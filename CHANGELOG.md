@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- Choose Follow system, Light, or Dark under Appearance in Settings. Changes apply immediately,
+  and your choice is saved and included in backups.
+
 ## [1.6.0] - 2026-11-05
 
 ### Added

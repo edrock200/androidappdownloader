@@ -1,6 +1,7 @@
 package io.github.edrock200.appdownloader.data
 
 import android.content.Context
+import kotlinx.serialization.Serializable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -17,8 +18,16 @@ data class SettingsState(
     val scheduleRepeat: Repeat = Repeat.ONCE,
     /** Scheduled / "update all" runs skip links whose file the server says hasn't changed. */
     val updateOnlyIfChanged: Boolean = true,
+    val themeMode: ThemeMode = ThemeMode.SYSTEM,
 ) {
     val hasSchedule get() = scheduleAt > 0
+}
+
+@Serializable
+enum class ThemeMode(val label: String) {
+    SYSTEM("Follow system"),
+    LIGHT("Light"),
+    DARK("Dark"),
 }
 
 /** How a scheduled update repeats. [hours] > 0 means "every N hours throughout the day". */
@@ -52,6 +61,7 @@ class Settings(context: Context) {
             .putLong(KEY_SCHEDULE_AT, newState.scheduleAt)
             .putString(KEY_SCHEDULE_REPEAT, newState.scheduleRepeat.name)
             .putBoolean(KEY_ONLY_IF_CHANGED, newState.updateOnlyIfChanged)
+            .putString(KEY_THEME_MODE, newState.themeMode.name)
             .apply()
         _state.value = newState.copy(githubToken = newState.githubToken.trim())
     }
@@ -65,9 +75,12 @@ class Settings(context: Context) {
         scheduleRepeat = runCatching { Repeat.valueOf(prefs.getString(KEY_SCHEDULE_REPEAT, null)!!) }
             .getOrDefault(Repeat.ONCE),
         updateOnlyIfChanged = prefs.getBoolean(KEY_ONLY_IF_CHANGED, true),
+        themeMode = runCatching { ThemeMode.valueOf(prefs.getString(KEY_THEME_MODE, null)!!) }
+            .getOrDefault(ThemeMode.SYSTEM),
     )
 
     companion object {
+        private const val KEY_THEME_MODE = "theme_mode"
         private const val KEY_TOKEN = "github_token"
         private const val KEY_INTERVAL = "check_interval_hours"
         private const val KEY_DELETE = "delete_after_install"
