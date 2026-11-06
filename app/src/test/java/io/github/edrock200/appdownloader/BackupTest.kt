@@ -4,6 +4,7 @@ import io.github.edrock200.appdownloader.data.AppEntry
 import io.github.edrock200.appdownloader.data.Backup
 import io.github.edrock200.appdownloader.data.Repeat
 import io.github.edrock200.appdownloader.data.SettingsState
+import io.github.edrock200.appdownloader.data.ThemeMode
 import io.github.edrock200.appdownloader.data.SourceType
 import io.github.edrock200.appdownloader.net.RemoteChange
 import org.junit.Assert.assertEquals
@@ -35,6 +36,25 @@ class BackupTest {
         assertNull(back.settings.githubToken) // Not included unless asked.
         assertEquals(Repeat.EVERY_4H, back.settings.scheduleRepeat)
         assertTrue("download state must not be saved", !json.contains("readyFile") && !json.contains("installedTag"))
+    }
+
+    @Test
+    fun themeSurvivesFileAndQrBackupAndRestore() {
+        for (mode in ThemeMode.entries) {
+            val backup = Backup.create(entries, settings.copy(themeMode = mode), false, null, now)
+            val file = Backup.parse(Backup.toJson(backup))
+            val qr = Backup.parse(Backup.toQrText(backup)!!)
+            for (parsed in listOf(file, qr)) {
+                assertEquals(mode, parsed.settings.themeMode)
+                assertEquals(mode, Backup.restoreSettings(SettingsState(), parsed.settings, now).themeMode)
+            }
+        }
+    }
+
+    @Test
+    fun olderBackupDefaultsToSystemTheme() {
+        val backup = Backup.parse("""{"format":"app-downloader-backup","settings":{}}""")
+        assertEquals(ThemeMode.SYSTEM, backup.settings.themeMode)
     }
 
     @Test

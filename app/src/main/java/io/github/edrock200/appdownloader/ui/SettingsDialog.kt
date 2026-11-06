@@ -36,6 +36,7 @@ import io.github.edrock200.appdownloader.BuildConfig
 import io.github.edrock200.appdownloader.data.Repeat
 import io.github.edrock200.appdownloader.data.Settings
 import io.github.edrock200.appdownloader.data.SettingsState
+import io.github.edrock200.appdownloader.data.ThemeMode
 
 @Composable
 fun SettingsDialog(
@@ -44,6 +45,7 @@ fun SettingsDialog(
     onCheckSelfUpdate: () -> Unit,
     onScheduleChange: (at: Long, repeat: Repeat) -> Unit,
     onOnlyIfChangedChange: (Boolean) -> Unit,
+    onThemeModeChange: (ThemeMode) -> Unit,
     onUpdateAllNow: () -> Unit,
     onSaveBackup: (includeToken: Boolean) -> Unit,
     onRestoreBackup: () -> Unit,
@@ -66,6 +68,20 @@ fun SettingsDialog(
         title = { Text("Settings") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Appearance", style = MaterialTheme.typography.titleSmall)
+                ThemeMode.entries.forEach { mode ->
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .focusHighlight(FocusShapes.Row, scaleUp = false)
+                            .selectable(selected = current.themeMode == mode, onClick = { onThemeModeChange(mode) }, role = Role.RadioButton),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(selected = current.themeMode == mode, onClick = null)
+                        Text(mode.label, Modifier.padding(start = 8.dp, top = 6.dp, bottom = 6.dp))
+                    }
+                }
+                HorizontalDivider()
                 // The schedule is saved as soon as it is set, so it isn't lost if Settings is cancelled.
                 Text("Scheduled updates", style = MaterialTheme.typography.titleSmall)
                 Text(

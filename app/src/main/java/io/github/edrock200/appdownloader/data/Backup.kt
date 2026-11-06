@@ -31,6 +31,7 @@ data class BackupSettings(
     val scheduleAt: Long = 0,
     val scheduleRepeat: Repeat = Repeat.ONCE,
     val updateOnlyIfChanged: Boolean = true,
+    val themeMode: ThemeMode = ThemeMode.SYSTEM,
 )
 
 @Serializable
@@ -84,6 +85,7 @@ object Backup {
             scheduleAt = settings.scheduleAt,
             scheduleRepeat = settings.scheduleRepeat,
             updateOnlyIfChanged = settings.updateOnlyIfChanged,
+            themeMode = settings.themeMode,
         ),
         apps = entries.map {
             BackupApp(
@@ -176,6 +178,7 @@ object Backup {
             scheduleAt = next ?: 0,
             scheduleRepeat = backup.scheduleRepeat,
             updateOnlyIfChanged = backup.updateOnlyIfChanged,
+            themeMode = backup.themeMode,
         )
     }
 }
