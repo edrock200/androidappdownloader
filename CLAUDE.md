@@ -38,7 +38,7 @@ All code lives in `app/src/main/java/io/github/edrock200/appdownloader/`:
 | `net/AftvResolver.kt` | Resolves codes via `https://go.aftvnews.com/<code>` by parsing the redirect page HTML. |
 | `net/GitHubClient.kt` | Releases API, repo URL parsing, `pickRelease` (pure). |
 | `net/AssetSelector.kt` | Chooses the release asset for the device ABI / user filter (pure). |
-| `net/RemoteProbe.kt` | Header-only "has this file changed?" check: `fingerprint(url)` (HEAD, falls back to a 1-byte ranged GET), pure `fromHeaders`/`compare`. |
+| `net/RemoteProbe.kt` | "Has this file changed?" without a full download: `fingerprint(url)` (HEAD / 1-byte GET headers, follows a page's APK link, hashes the last 256 KB via a positional Range request — GitHub's storage rejects suffix ranges), pure `compare` and `decide`. |
 | `install/ApkDownloader.kt` | Streaming download with progress; scans HTML pages for `.apk` links; validates zip magic. |
 | `install/ApkInspector.kt` | Reads package name/version/label; picks splits from `.xapk`/`.apks`; `InstalledApps` lookup. |
 | `install/ApkInstaller.kt` | `PackageInstaller` session install; result goes to `InstallResultReceiver`. |
@@ -97,9 +97,14 @@ Unit tests are in `app/src/test/...` and cover the pure logic only.
   waiting for each result (`awaitInstallResult`). `runInstall` always prefers a waiting `readyFile`;
   stale ones (older than installed, or not the latest GitHub tag) are discarded.
 - **Link change detection:** each download records a `RemoteFingerprint` (ETag, Last-Modified, size,
-  host+path without query) as `pendingFingerprint`; `onInstallSucceeded` promotes it to `fingerprint`.
-  `checkLink` probes the server and stores `remoteFingerprint`/`remoteChange` (CHANGED / UNCHANGED /
-  UNKNOWN). `RemoteProbe.compare` trusts ETag/date; size/address alone can only prove a change. With
+  host+path without query, `tailHash` = SHA-256 of the last 256 KB) as `pendingFingerprint`;
+  `onInstallSucceeded` promotes it to `fingerprint`. `checkLink` probes the server and calls
+  `RemoteProbe.decide`, in order: (1) CONTENT — compare the remote tail hash/length with the installed
+  APK (`InstalledApps.localApk`, single-APK installs only; needs no saved fingerprint), (2) SAVED_DETAILS —
+  `compare(fingerprint, remote)`, (3) DATE — remote Last-Modified vs `PackageInfo.lastUpdateTime`
+  (±2 min), else UNKNOWN with NO_DETAILS / NO_BASELINE. It stores `remoteChange`/`remoteReason`, and a
+  `newBaseline` as `fingerprint`. `compare` trusts the tail hash, then ETag/date; size/address alone
+  can only prove a change. With
   the `updateOnlyIfChanged` setting, `prepareUpdate` skips links only when the result is UNCHANGED;
   UNKNOWN still downloads and compares versionCode (and then records the download as the new baseline).
   `checkAll` covers GitHub entries and installed links; `VersionUtils.updateAvailable` drives the card.

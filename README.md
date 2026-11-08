@@ -23,11 +23,12 @@ installing them in one tap. It understands three kinds of sources:
 - Built for TV remotes on Fire TV, Android TV and Google TV: it appears in the TV launcher, the
   selected button is clearly outlined, there's extra margin for TV overscan, and options that need a
   web browser are hidden on TVs without one.
-- **Change detection for links:** for direct links and aftv.news codes the app asks the website
-  whether the file changed since you installed it, without downloading it, and shows *Changed on
-  the website* / *No change* on the card. This works when the site reports a file fingerprint
-  (ETag), modification date or size, as GitHub, F-Droid and most file hosts do. Web pages and
-  download scripts usually don't, and show *The website doesn't say if it changed*.
+- **Change detection for links:** for direct links and aftv.news codes the app checks whether the
+  website has a newer file than the one installed, without downloading it all: it compares the end
+  of the website's file (where an APK's signature lives) with the installed copy, falling back to the
+  file details saved at the last install and to the website's modification date. Cards show
+  *Newer file on the website* / *Same as your installed copy*. Sites that give no file details and
+  don't allow partial downloads (some download scripts) can't be checked and say so.
 - **Scheduled updates:** choose a date and time (once, daily or weekly) and every app with
   *Auto-update* ticked is updated then. On Android 12+ apps that App Downloader installed are
   updated silently; anything Android wants you to confirm is downloaded and waiting, and the app

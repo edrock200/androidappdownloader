@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- New versions behind plain links and aftv.news codes are now detected for apps you installed some
+  other way or before version 1.3.0. Before, those always showed "can't tell". App Downloader now
+  compares the website's file with the copy installed on your device, downloading only a small part
+  of it, and otherwise uses the date the website's file was changed.
+- Links that open a web page with a download link on it are now checked too.
+- When a change can't be detected, the app now says why.
+
 ## [1.7.0] - 2026-11-06
 
 ### Added

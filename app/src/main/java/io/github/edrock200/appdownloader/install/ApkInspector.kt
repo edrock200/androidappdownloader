@@ -5,6 +5,8 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.content.pm.PackageInfoCompat
 import io.github.edrock200.appdownloader.net.AssetSelector
+import io.github.edrock200.appdownloader.net.LocalApk
+import io.github.edrock200.appdownloader.net.RemoteProbe
 import java.io.File
 import java.io.IOException
 import java.util.zip.ZipFile
@@ -91,6 +93,19 @@ data class InstalledInfo(
 )
 
 object InstalledApps {
+    /**
+     * The installed APK file of a single-APK app, for comparing with a website's file. Null for
+     * apps installed as split bundles (e.g. from the Play Store), whose files can't be compared.
+     */
+    fun localApk(context: Context, packageName: String?): LocalApk? {
+        if (packageName.isNullOrBlank()) return null
+        return runCatching {
+            val info = context.packageManager.getApplicationInfo(packageName, 0)
+            if (!info.splitSourceDirs.isNullOrEmpty()) return null
+            RemoteProbe.localApk(File(info.sourceDir))
+        }.getOrNull()
+    }
+
     fun get(context: Context, packageName: String?): InstalledInfo? {
         if (packageName.isNullOrBlank()) return null
         return try {

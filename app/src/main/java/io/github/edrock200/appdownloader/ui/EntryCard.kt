@@ -47,6 +47,7 @@ import androidx.compose.ui.unit.dp
 import io.github.edrock200.appdownloader.OpState
 import io.github.edrock200.appdownloader.data.SourceType
 import io.github.edrock200.appdownloader.net.AftvResolver
+import io.github.edrock200.appdownloader.net.ChangeReason
 import io.github.edrock200.appdownloader.net.RemoteChange
 
 @Composable
@@ -157,11 +158,17 @@ fun EntryCard(
                             style = MaterialTheme.typography.bodySmall,
                         )
                         entry.remoteChange == RemoteChange.CHANGED ->
-                            InfoLine("File", "Changed on the website$checked", highlight = true)
+                            InfoLine("File", "Newer file on the website$checked", highlight = true)
                         entry.remoteChange == RemoteChange.UNCHANGED ->
-                            InfoLine("File", "No change since you installed it$checked")
+                            InfoLine(
+                                "File",
+                                (if (entry.remoteReason == ChangeReason.CONTENT) "Same as your installed copy"
+                                else "No change since you installed it") + checked,
+                            )
+                        entry.remoteChange == RemoteChange.UNKNOWN && entry.remoteReason == ChangeReason.NO_BASELINE ->
+                            InfoLine("File", "Can't compare yet: update or reinstall it once from here$checked")
                         entry.remoteChange == RemoteChange.UNKNOWN ->
-                            InfoLine("File", "The website doesn't say if it changed$checked")
+                            InfoLine("File", "This website doesn't give file details, so changes can't be seen$checked")
                         else -> InfoLine("File", "Not checked yet")
                     }
                 }

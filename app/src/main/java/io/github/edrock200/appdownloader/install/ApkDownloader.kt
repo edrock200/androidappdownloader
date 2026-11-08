@@ -115,7 +115,7 @@ object ApkDownloader {
                 contentLength = dest.length().toString(),
                 contentRange = null,
                 finalUrl = finalUrl,
-            )
+            )?.let { fp -> RemoteProbe.localApk(dest)?.let { fp.copy(tailHash = it.tailHash) } ?: fp }
             return Result(dest, finalUrl, fileName, fingerprint)
         }
     }

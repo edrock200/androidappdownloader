@@ -18,6 +18,7 @@ import io.github.edrock200.appdownloader.install.InstalledApps
 import io.github.edrock200.appdownloader.install.NotAnApkException
 import io.github.edrock200.appdownloader.net.AftvResolver
 import io.github.edrock200.appdownloader.net.GitHubClient
+import io.github.edrock200.appdownloader.net.ChangeReason
 import io.github.edrock200.appdownloader.net.RemoteChange
 import io.github.edrock200.appdownloader.net.RemoteFingerprint
 import io.github.edrock200.appdownloader.net.RemoteProbe
@@ -271,6 +272,7 @@ class AppController(
                     fingerprint = installedFp ?: e.fingerprint,
                     pendingFingerprint = null,
                     remoteChange = if (installedFp != null) RemoteChange.UNCHANGED else e.remoteChange,
+                    remoteReason = if (installedFp != null) ChangeReason.SAVED_DETAILS else e.remoteReason,
                     remoteFingerprint = installedFp ?: e.remoteFingerprint,
                     installedTag = releaseTag ?: e.installedTag,
                     installedVersionCode = versionCode.takeIf { it >= 0 } ?: e.installedVersionCode,
@@ -360,9 +362,20 @@ class AppController(
                 else -> entry.source
             }
             val remote = RemoteProbe.fingerprint(url)
-            val change = RemoteProbe.compare(entry.fingerprint, remote)
+            val (installedApk, installedAt) = withContext(Dispatchers.IO) {
+                InstalledApps.localApk(context, entry.packageName) to
+                    (InstalledApps.get(context, entry.packageName)?.installedAt ?: 0L)
+            }
+            val decision = RemoteProbe.decide(entry.fingerprint, remote, installedApk, installedAt)
             repository.update(entry.id) {
-                it.copy(remoteFingerprint = remote, remoteChange = change, remoteCheckedAt = now, lastCheckError = null)
+                it.copy(
+                    remoteFingerprint = remote,
+                    remoteChange = decision.change,
+                    remoteReason = decision.reason,
+                    remoteCheckedAt = now,
+                    lastCheckError = null,
+                    fingerprint = decision.newBaseline ?: it.fingerprint,
+                )
             }
         } catch (e: CancellationException) {
             throw e
@@ -647,7 +660,12 @@ class AppController(
             if (tag == null && apk.fingerprint != null) {
                 // Nothing newer in this file: use it as the baseline for future change checks.
                 repository.update(entryId) {
-                    it.copy(fingerprint = apk.fingerprint, remoteFingerprint = apk.fingerprint, remoteChange = RemoteChange.UNCHANGED)
+                    it.copy(
+                        fingerprint = apk.fingerprint,
+                        remoteFingerprint = apk.fingerprint,
+                        remoteChange = RemoteChange.UNCHANGED,
+                        remoteReason = ChangeReason.SAVED_DETAILS,
+                    )
                 }
             }
             if (tag != null && apk.info.versionCode == installed.versionCode) {

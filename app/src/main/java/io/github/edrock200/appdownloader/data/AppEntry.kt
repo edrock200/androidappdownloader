@@ -1,5 +1,6 @@
 package io.github.edrock200.appdownloader.data
 
+import io.github.edrock200.appdownloader.net.ChangeReason
 import io.github.edrock200.appdownloader.net.RemoteChange
 import io.github.edrock200.appdownloader.net.RemoteFingerprint
 import kotlinx.serialization.Serializable
@@ -64,6 +65,8 @@ data class AppEntry(
     val remoteFingerprint: RemoteFingerprint? = null,
     /** Result of the last check; null when never checked. */
     val remoteChange: RemoteChange? = null,
+    /** How [remoteChange] was decided (for the card's explanation). */
+    val remoteReason: ChangeReason? = null,
     val remoteCheckedAt: Long? = null,
     /** [RemoteFingerprint.key] we already notified about. */
     val notifiedChangeKey: String? = null,
