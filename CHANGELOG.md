@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.7.1] - 2026-11-08
+
 ### Fixed
 - New versions behind plain links and aftv.news codes are now detected for apps you installed some
   other way or before version 1.3.0. Before, those always showed "can't tell". App Downloader now
