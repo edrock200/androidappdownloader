@@ -156,7 +156,8 @@ class RulesTest {
 
     @Test
     fun versionCodeMatchesVersionName() {
-        val (a, b, c) = BuildConfig.VERSION_NAME.split('.').map { it.toInt() }
+        // CI test builds append "-dev+<commit>" (versionNameSuffix); the code comes from the number part.
+        val (a, b, c) = BuildConfig.VERSION_NAME.substringBefore('-').split('.').map { it.toInt() }
         assertEquals(a * 10_000 + b * 100 + c, BuildConfig.VERSION_CODE)
     }
 
