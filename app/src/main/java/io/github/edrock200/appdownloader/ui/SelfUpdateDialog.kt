@@ -1,5 +1,6 @@
 package io.github.edrock200.appdownloader.ui
 
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -32,20 +33,16 @@ fun SelfUpdateDialog(
         onDismissRequest = { if (!busy) onLater() },
         title = { Text("Update available") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            // One scrolling column; status first so it's never pushed off screen, and focusable
+            // paragraphs so a TV remote can scroll long release notes.
+            Column(
+                Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 Text(
                     "App Downloader ${update.version} is available. You have version ${BuildConfig.VERSION_NAME}.",
                     style = MaterialTheme.typography.bodyLarge,
                 )
-                update.notes?.let { notes ->
-                    Column(
-                        Modifier
-                            .heightIn(max = 220.dp)
-                            .verticalScroll(rememberScrollState()),
-                    ) {
-                        Text(plainText(notes), style = MaterialTheme.typography.bodyMedium)
-                    }
-                }
                 when (op) {
                     null -> Text(
                         "The app will close once the update is installed. Just open it again afterwards.",
@@ -67,13 +64,27 @@ fun SelfUpdateDialog(
                         LinearProgressIndicator(Modifier.fillMaxWidth())
                     }
                 }
+                update.notes?.let { notes ->
+                    plainText(notes).split("\n\n").filter { it.isNotBlank() }.forEach { paragraph ->
+                        Text(
+                            paragraph,
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.fillMaxWidth().focusHighlight(FocusShapes.Row, scaleUp = false).focusable(),
+                        )
+                    }
+                }
             }
         },
         confirmButton = {
-            if (!busy) {
-                Button(onClick = onUpdate, modifier = Modifier.focusHighlight()) {
-                    Text(if (op is OpState.Failed) "Try again" else "Update now")
-                }
+            // Stays in place while downloading so a TV remote's focus isn't lost; presses are ignored then.
+            Button(onClick = { if (!busy) onUpdate() }, modifier = Modifier.focusHighlight()) {
+                Text(
+                    when {
+                        busy -> "Updating…"
+                        op is OpState.Failed -> "Try again"
+                        else -> "Update now"
+                    }
+                )
             }
         },
         dismissButton = {

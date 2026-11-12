@@ -32,7 +32,9 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.focus.onFocusChanged
 import io.github.edrock200.appdownloader.BuildConfig
+import io.github.edrock200.appdownloader.SelfCheckState
 import io.github.edrock200.appdownloader.data.Repeat
 import io.github.edrock200.appdownloader.data.Settings
 import io.github.edrock200.appdownloader.data.SettingsState
@@ -41,9 +43,14 @@ import io.github.edrock200.appdownloader.data.SettingsState
 fun SettingsDialog(
     current: SettingsState,
     updatingAll: Boolean,
+    selfCheckState: SelfCheckState,
+    tokenExpired: Boolean,
+    canPostNotifications: Boolean,
+    /** Applies a change immediately (every setting saves as soon as it is changed). */
+    onChange: (SettingsState) -> Unit,
+    onAskNotifications: () -> Unit,
     onCheckSelfUpdate: () -> Unit,
     onScheduleChange: (at: Long, repeat: Repeat) -> Unit,
-    onOnlyIfChangedChange: (Boolean) -> Unit,
     onUpdateAllNow: () -> Unit,
     onSaveBackup: (includeToken: Boolean) -> Unit,
     onRestoreBackup: () -> Unit,
@@ -51,22 +58,25 @@ fun SettingsDialog(
     onScanQr: (() -> Unit)?,
     onRestoreFromLink: () -> Unit,
     onDismiss: () -> Unit,
-    onSave: (SettingsState) -> Unit,
 ) {
     val context = LocalContext.current
+    // The token is typed, so it is saved when leaving the dialog (or pressing any action), not per keystroke.
     var token by rememberSaveable { mutableStateOf(current.githubToken) }
-    var interval by rememberSaveable { mutableStateOf(current.checkIntervalHours) }
-    var deleteAfter by rememberSaveable { mutableStateOf(current.deleteApkAfterInstall) }
-    var selfUpdates by rememberSaveable { mutableStateOf(current.checkSelfUpdates) }
     var editingSchedule by rememberSaveable { mutableStateOf(false) }
     var backupToken by rememberSaveable { mutableStateOf(false) }
+    fun commitToken() {
+        if (token.trim() != current.githubToken) onChange(current.copy(githubToken = token.trim()))
+    }
+    fun leaveWith(action: () -> Unit) {
+        commitToken()
+        action()
+    }
 
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { leaveWith(onDismiss) },
         title = { Text("Settings") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                // The schedule is saved as soon as it is set, so it isn't lost if Settings is cancelled.
                 Text("Scheduled updates", style = MaterialTheme.typography.titleSmall)
                 Text(
                     if (current.hasSchedule) {
@@ -76,6 +86,13 @@ fun SettingsDialog(
                     },
                     style = MaterialTheme.typography.bodyMedium,
                 )
+                if (current.lastRunAt > 0) {
+                    Text(
+                        "Last run: ${formatDateTime(context, current.lastRunAt)} · ${current.lastRunSummary}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(onClick = { editingSchedule = true }, modifier = Modifier.focusHighlight()) {
                         Text(if (current.hasSchedule) "Change" else "Set date & time")
@@ -86,14 +103,20 @@ fun SettingsDialog(
                         }
                     }
                 }
-                SwitchRow("Only update links whose file has changed", current.updateOnlyIfChanged, onOnlyIfChangedChange)
+                SwitchRow("Only update links whose file has changed", current.updateOnlyIfChanged) {
+                    onChange(current.copy(updateOnlyIfChanged = it))
+                }
                 Text(
                     "Asks the website whether the file changed before downloading it. If the website " +
                         "doesn't say, the file is downloaded and its version compared, so no update is missed.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                OutlinedButton(onClick = onUpdateAllNow, enabled = !updatingAll, modifier = Modifier.focusHighlight()) {
+                SwitchRow("Download scheduled updates on Wi-Fi only", current.wifiOnly) { onChange(current.copy(wifiOnly = it)) }
+                SwitchRow("Allow automatic updates from unencrypted (http) links", current.allowInsecureAutoUpdates) {
+                    onChange(current.copy(allowInsecureAutoUpdates = it))
+                }
+                OutlinedButton(onClick = { if (!updatingAll) leaveWith(onUpdateAllNow) }, modifier = Modifier.focusHighlight()) {
                     Text(if (updatingAll) "Updating…" else "Update all now")
                 }
                 Text(
@@ -103,36 +126,57 @@ fun SettingsDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 HorizontalDivider()
-                Text("Check GitHub for updates", style = MaterialTheme.typography.titleSmall)
+                Text("Check for updates in the background", style = MaterialTheme.typography.titleSmall)
                 Settings.INTERVAL_OPTIONS.forEach { hours ->
                     Row(
                         Modifier
                             .fillMaxWidth()
                             .focusHighlight(FocusShapes.Row, scaleUp = false)
-                            .selectable(selected = interval == hours, onClick = { interval = hours }, role = Role.RadioButton),
+                            .selectable(
+                                selected = current.checkIntervalHours == hours,
+                                onClick = { onChange(current.copy(checkIntervalHours = hours)) },
+                                role = Role.RadioButton,
+                            ),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        RadioButton(selected = interval == hours, onClick = null)
+                        RadioButton(selected = current.checkIntervalHours == hours, onClick = null)
                         Text(
                             if (hours == 0) "Never (manual only)" else "Every $hours hours",
                             modifier = Modifier.padding(start = 8.dp, top = 6.dp, bottom = 6.dp),
                         )
                     }
                 }
+                if (!canPostNotifications) {
+                    Text(
+                        "Notifications are off, so you won't be told about updates found in the background.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    OutlinedButton(onClick = onAskNotifications, modifier = Modifier.focusHighlight()) { Text("Allow notifications") }
+                }
                 HorizontalDivider()
                 OutlinedTextField(
                     value = token,
                     onValueChange = { token = it },
                     label = { Text("GitHub token (optional)") },
+                    isError = tokenExpired && token.trim() == current.githubToken,
                     supportingText = {
-                        Text("Raises the API limit from 60 to 5,000 checks/hour and allows private repos.")
+                        Text(
+                            if (tokenExpired && token.trim() == current.githubToken) {
+                                "This token has expired or was revoked. Paste a new one, or clear it."
+                            } else {
+                                "Raises the limit from 60 to 5,000 checks/hour and allows private repositories."
+                            }
+                        )
                     },
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().onFocusChanged { if (!it.isFocused) commitToken() },
                 )
-                SwitchRow("Delete APK after installing", deleteAfter) { deleteAfter = it }
+                SwitchRow("Delete APK after installing", current.deleteApkAfterInstall) {
+                    onChange(current.copy(deleteApkAfterInstall = it))
+                }
                 HorizontalDivider()
                 Text("Back up & restore", style = MaterialTheme.typography.titleSmall)
                 Text(
@@ -143,25 +187,25 @@ fun SettingsDialog(
                 if (current.githubToken.isNotBlank()) {
                     CheckboxRow(
                         label = "Include GitHub token in backup files",
-                        detail = "Leave this off if you'll share the file. QR codes never include it.",
+                        detail = "Leave this off if you'll share the file. QR codes and backups saved to the shared Downloads folder never include it.",
                         checked = backupToken,
                     ) { backupToken = it }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { onSaveBackup(backupToken) }, modifier = Modifier.focusHighlight()) {
+                    OutlinedButton(onClick = { leaveWith { onSaveBackup(backupToken) } }, modifier = Modifier.focusHighlight()) {
                         Text("Save backup file")
                     }
-                    OutlinedButton(onClick = onRestoreBackup, modifier = Modifier.focusHighlight()) {
+                    OutlinedButton(onClick = { leaveWith(onRestoreBackup) }, modifier = Modifier.focusHighlight()) {
                         Text("Restore from file")
                     }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = onShowQr, modifier = Modifier.focusHighlight()) { Text("Show QR code") }
+                    OutlinedButton(onClick = { leaveWith(onShowQr) }, modifier = Modifier.focusHighlight()) { Text("Show QR code") }
                     if (onScanQr != null) {
-                        OutlinedButton(onClick = onScanQr, modifier = Modifier.focusHighlight()) { Text("Scan QR code") }
+                        OutlinedButton(onClick = { leaveWith(onScanQr) }, modifier = Modifier.focusHighlight()) { Text("Scan QR code") }
                     }
                 }
-                OutlinedButton(onClick = onRestoreFromLink, modifier = Modifier.focusHighlight()) {
+                OutlinedButton(onClick = { leaveWith(onRestoreFromLink) }, modifier = Modifier.focusHighlight()) {
                     Text("Restore from link or aftv.news code")
                 }
                 HorizontalDivider()
@@ -169,10 +213,22 @@ fun SettingsDialog(
                 CheckboxRow(
                     label = "Check for App Downloader updates each time it's opened",
                     detail = "If a new version is available, you'll be asked whether to install it.",
-                    checked = selfUpdates,
-                ) { selfUpdates = it }
-                OutlinedButton(onClick = onCheckSelfUpdate, modifier = Modifier.focusHighlight()) {
-                    Text("Check for app update now")
+                    checked = current.checkSelfUpdates,
+                ) { onChange(current.copy(checkSelfUpdates = it)) }
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedButton(onClick = onCheckSelfUpdate, modifier = Modifier.focusHighlight()) {
+                        Text("Check for app update now")
+                    }
+                    // The result shows here: messages would appear behind this dialog.
+                    Text(
+                        when (selfCheckState) {
+                            SelfCheckState.CHECKING -> "Checking…"
+                            SelfCheckState.UP_TO_DATE -> "Up to date"
+                            SelfCheckState.FAILED -> "Couldn't check"
+                            SelfCheckState.IDLE -> ""
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
                 }
                 HorizontalDivider()
                 val canInstall = SystemActions.canInstallPackages(context)
@@ -196,18 +252,8 @@ fun SettingsDialog(
             }
         },
         confirmButton = {
-            TextButton(modifier = Modifier.focusHighlight(), onClick = {
-                onSave(
-                    current.copy(
-                        githubToken = token,
-                        checkIntervalHours = interval,
-                        deleteApkAfterInstall = deleteAfter,
-                        checkSelfUpdates = selfUpdates,
-                    )
-                )
-            }) { Text("Save") }
+            TextButton(modifier = Modifier.focusHighlight(), onClick = { leaveWith(onDismiss) }) { Text("Done") }
         },
-        dismissButton = { TextButton(onClick = onDismiss, modifier = Modifier.focusHighlight()) { Text("Cancel") } },
     )
 
     if (editingSchedule) {

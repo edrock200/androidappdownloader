@@ -85,7 +85,7 @@ class ScheduleTest {
     @Test
     fun summariesReadNaturally() {
         assertEquals(
-            "Updated 2, 1 waiting to install, 3 up to date, 1 failed",
+            "Updated 2, 1 waiting to install, 3 up to date, 1 failed (d)",
             UpdateRunSummary(listOf("a", "b"), listOf("c"), emptyList(), 3, listOf("d")).describe(),
         )
         assertEquals("No apps are selected for auto-update", UpdateRunSummary().describe())

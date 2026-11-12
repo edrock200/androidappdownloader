@@ -27,14 +27,15 @@ All code lives in `app/src/main/java/io/github/edrock200/appdownloader/`:
 
 | Path | Responsibility |
 |---|---|
-| `App.kt` | `Application`; builds the singletons (`repository`, `settings`, `controller`). Use `context.app()` to reach them. |
-| `AppController.kt` | Process-wide coordinator: download → inspect → install pipeline, GitHub checks, per-entry `OpState`, snackbar `messages`. |
+| `App.kt` | `Application`; builds the singletons (`repository`, `settings`, `controller`), tracks foreground (`isForeground`), re-arms the schedule (`refreshSchedule`), CoroutineExceptionHandler safety net. Use `context.app()` to reach them. |
+| `AppController.kt` | Process-wide coordinator: download → inspect → install pipeline, update checks, batches, self-update, per-entry `OpState`, snackbar `messages`. **Main-thread confined**: workers switch to `Dispatchers.Main` before calling in. |
 | `data/AppEntry.kt` | The persisted model (`@Serializable`). One class for all source types; GitHub-only fields are nullable. |
-| `data/EntryRepository.kt` | JSON file in `filesDir`, exposed as `StateFlow`, writes serialized by a `Mutex`. |
+| `data/EntryRepository.kt` | JSON file in `filesDir`, exposed as `StateFlow`, writes serialized by a `Mutex`. Atomic writes (tmp + fsync + rename) with `entries.json.bak`; per-entry decoding; damaged files kept aside; failed saves keep memory state and set `problem`. |
 | `data/Settings.kt` | SharedPreferences-backed settings as a `StateFlow`. |
 | `data/SourceParser.kt` | Detects whether user input is an aftv code, a GitHub repo or a URL. |
 | `data/VersionUtils.kt` | Version comparison and the `hasUpdate` rule. |
-| `net/Http.kt` | Shared OkHttp client + coroutine `execute`. |
+| `net/Http.kt` | Shared OkHttp clients (`client` for downloads, `metaClient` with a call timeout for lookups), coroutine `execute` that cancels the call; blocks https→http redirects; bundles Let's Encrypt roots below Android 7.1.1. |
+| `net/Errors.kt`, `net/LinkNormalizer.kt` | Plain-language error messages (`Errors.friendly`, `isConnectivity`); Dropbox/Google Drive share links → direct downloads. |
 | `net/AftvResolver.kt` | Resolves codes via `https://go.aftvnews.com/<code>` by parsing the redirect page HTML. |
 | `net/GitHubClient.kt` | Releases API, repo URL parsing, `pickRelease` (pure). |
 | `net/AssetSelector.kt` | Chooses the release asset for the device ABI / user filter (pure). |
@@ -59,12 +60,18 @@ Unit tests are in `app/src/test/...` and cover the pure logic only.
 
 ## How the main flows work
 
-- **Install:** `AppController.downloadAndInstall(id)` resolves the URL (aftv / GitHub check), downloads
-  to `cacheDir/apks/<entryId>.<ext>`, inspects it (stores `packageName`, replaces an auto-generated
-  name with the app label), then commits a `PackageInstaller` session. The session result arrives in
-  `InstallResultReceiver`, which launches the system confirm screen (`STATUS_PENDING_USER_ACTION`) or
-  calls `controller.onInstallSucceeded/onInstallFailed`. Data needed after install (entry id, release
-  tag, version code, file path) travels in the PendingIntent extras so it survives process death.
+- **Install:** `AppController.downloadAndInstall(id)` claims the entry (`OpState.Resolving`) before
+  suspending, resolves the URL (aftv / GitHub check; private repos via the asset API URL + token),
+  downloads to `cacheDir/apks/<entryId>.<ext>` (unique `.part` per attempt, verified against GitHub's
+  size/sha256, free-space check), inspects it, refuses an older versionCode (records `notNewer` /
+  `skippedTag`) or a different package (`OpState.Failed.differentApp` → "Install anyway"), then commits
+  a session. `install()` records the session id in `sessions[opId]`; results of other/abandoned sessions
+  are ignored (successes are always recorded). `InstallResultReceiver` (goAsync) hands
+  `STATUS_PENDING_USER_ACTION` to `onNeedsConfirmation`: in the foreground the activity starts the
+  confirm intent via `confirmRequest`; in the background the session is abandoned and the file kept as
+  a waiting `readyFile`. `reconcileSessions()` (onResume) frees ops whose session vanished. packageName,
+  label, history and the fingerprint baseline are committed in `onInstallSucceeded` (EXTRA_PACKAGE/LABEL).
+  Jobs are owner-checked (`owns`) so a cancelled job never cleans up after its replacement.
 - **Update detection:** `VersionUtils.hasUpdate`. If the installed version code equals the one we
   installed, compare release tags; otherwise compare the tag's numbers with the installed
   `versionName`. Not installed → "Install", never "Update".
@@ -82,12 +89,23 @@ Unit tests are in `app/src/test/...` and cover the pure logic only.
   History is device-specific and not part of backups.
 - **Background checks:** `UpdateCheckWorker` → `checkAll()` → notify for GitHub entries whose
   `notifiedTag != latestTag` and links whose `notifiedChangeKey != remoteFingerprint.key`.
+- **Batches:** one at a time (`batchMutex`). UI batches (`updateAllNow`, `updateEntries`,
+  `installWaitingUpdates`) run each item as a registered child job (`runItem`) so card Cancel works;
+  `stopUpdateAll()` cancels the batch. Scheduled runs call `runScheduledUpdate()` (null when busy → the
+  worker retries without advancing the schedule).
 - **Scheduled "update all":** the schedule (`scheduleAt`, `scheduleRepeat`: once, daily, weekly, or
   hourly `EVERY_1H…EVERY_12H` — hourly steps are fixed real-time intervals, daily/weekly keep wall-clock
-  time across DST) lives in `Settings` and is
-  saved immediately by `MainViewModel.setSchedule`, which (re)enqueues a one-time WorkManager job.
-  `AutoUpdateWorker` calls `controller.updateSelected(interactive = false)`, then computes the next run
-  with `Schedule.nextRun` and enqueues it (`APPEND_OR_REPLACE` so it doesn't cancel itself).
+  time across DST and follow time-zone changes via `scheduleMinuteOfDay`/`scheduleWeekday`,
+  `Schedule.nextLocal`, `ClockChangeReceiver`) lives in `Settings` and is
+  saved immediately by `MainViewModel.setSchedule`, which (re)enqueues a one-time WorkManager job with
+  `AutoUpdateScheduler.constraints` (Wi-Fi only option, battery/storage not low). `App.onCreate`
+  re-arms it with `KEEP`. `AutoUpdateWorker` books the next run first, runs the update, stores
+  `lastRunAt/lastRunSummary`, and returns `Result.retry()` when every failure was the network.
+  Background installs: `canInstallSilently` (Android 12+, App Downloader is installer of record, not
+  `readyNeedsUser`; Android 12-13 only when the screen is off; Android 14+ checks/commits with
+  `InstallConstraints.GENTLE_UPDATE`). Background failures persist `failedVersionCode`/`failedTag`/
+  `lastUpdateError` so they aren't retried every run; insecure (http) sources need
+  `allowInsecureAutoUpdates`.
   `updateSelected` handles installed entries with `autoUpdate`: `prepareUpdate` checks GitHub (or, for
   links, downloads and compares versionCode), and stores a newer APK as `readyFile`/`readyVersion*`/`readyTag`.
   Background runs commit sessions with `EXTRA_BACKGROUND`; on Android 12+ they can complete silently,
@@ -121,7 +139,11 @@ Unit tests are in `app/src/test/...` and cover the pure logic only.
   for an `AppDownloader*.apk` asset and compares the tag with `BuildConfig.VERSION_NAME`. A newer one
   sets `controller.selfUpdate`, shown by `SelfUpdateDialog`; installing it reuses the download/install
   pipeline under the op id `AppController.SELF_UPDATE_ID` and refuses APKs with another package name.
-- **Releases:** running the workflow manually with input `version: X.Y.Z` (or pushing tag `vX.Y.Z`)
+- **Releases:** the workflow has a secret-free `build` job (tests, lint, `-dev+sha` test builds, release
+  notes + Discord dry-run, shellcheck) and a `release` job (only for a `vX.Y.Z` tag or a manual run
+  with `version`; refuses lower/duplicate versions and missing changelog sections, verifies the signing
+  certificate digest, creates a draft then publishes, `announce_only` re-posts). Actions are pinned to
+  commit SHAs. Running the workflow manually with input `version: X.Y.Z` (or pushing tag `vX.Y.Z`)
   sets `APP_VERSION_NAME` (versionCode =
   X*10000 + Y*100 + Z, computed in `app/build.gradle.kts`), signs with the `SIGNING_*` secrets,
   publishes the release with the fixed asset name `AppDownloader.apk`, and posts to the
@@ -151,6 +173,11 @@ Unit tests are in `app/src/test/...` and cover the pure logic only.
   snackbar via `controller.message(...)`; keep them actionable ("Add a token in Settings").
 - Dependencies are declared in `gradle/libs.versions.toml`; avoid adding libraries for things the
   platform/OkHttp/kotlinx.serialization already cover. Avoid `material-icons-extended` (APK size).
+- Release builds use R8 conservatively (`app/proguard-rules.pro`: `-dontobfuscate`, the app's own
+  classes and reflection-heavy libraries kept). Loosen it only after testing a release on a phone and
+  a Fire TV — a broken release also breaks self-update.
+- Network tests use `MockWebServer` (local); `GitHubClient.apiBase` and `AftvResolver.resolveBase` are
+  overridable for that. Don't add tests that reach the real internet.
 - Don't commit keystores or `local.properties`. Release signing is configured via `SIGNING_*`
   environment variables (see README). The only committed APKs are the signed release builds in
   `releases/`; never put a debug-signed APK there, because a different key breaks in-place updates.

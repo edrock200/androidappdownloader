@@ -19,6 +19,12 @@ notes=$(awk -v v="$version" '
   | sed -e '/./,$!d' | sed -e ':a' -e '/^\n*$/{$d;N;ba' -e '}')
 
 if [ -z "$notes" ]; then
+  # Releases run with STRICT=1: a missing or empty changelog section stops the release, instead of
+  # announcing a generic line everywhere (the Discord post can't be taken back).
+  if [ "${STRICT:-}" = "1" ]; then
+    echo "CHANGELOG.md has no '## [$version]' section with notes. Add one before releasing." >&2
+    exit 1
+  fi
   notes="Bug fixes and improvements."
 fi
 printf '%s\n' "$notes"

@@ -6,6 +6,32 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-11-12
+
+### Added
+- "Install all" after restoring a backup on a new device, and a "Stop" button while updating several apps.
+- Settings shows the result of the last scheduled update, and has "Wi-Fi only" for scheduled downloads.
+- Downloads from GitHub are checked against the published checksum; private GitHub repositories now download with a token.
+- Restoring a backup shows exactly which apps and settings it will add.
+
+### Changed
+- Background updates on Android 14+ wait until the app isn't in use, so videos aren't interrupted.
+- Much easier with a TV remote: the highlight no longer jumps away when you press a button, long lists scroll, and colours suit TVs better.
+- Settings save as soon as you change them; restored and saved backups are handled more safely.
+- Clearer messages instead of technical errors, and the app explains why a change can't be detected.
+- Old Fire TV devices can now download from sites that use Let's Encrypt certificates.
+- The app is about a third of its previous size.
+
+### Fixed
+- No more false "update" stars when the internet is down, or when your installed copy is newer than the website's.
+- An install prompt is no longer lost if you leave the app during a download; you can show it again.
+- Cancel works during "Update all", and old install attempts no longer interfere with new ones.
+- A full disk no longer crashes the app, and a damaged saved list is recovered instead of wiped.
+- Withdrawn GitHub releases are no longer offered as updates, and failed automatic updates aren't retried every night.
+- Scheduled updates restart if they were lost, stay at your local time after travelling, don't repeat the same notification every hour, and retry when the network was down.
+- An expired GitHub token no longer stops update checks.
+- Many smaller fixes to app bundles, backups, links and notifications.
+
 ## [1.7.1] - 2026-11-08
 
 ### Fixed

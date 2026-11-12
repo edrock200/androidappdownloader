@@ -93,15 +93,19 @@ class RemoteChangeTest {
         assertEquals(ChangeReason.SAVED_DETAILS, RemoteProbe.decide(saved, RemoteFingerprint(etag = "b"), null, 0).reason)
         assertEquals(RemoteChange.CHANGED, RemoteProbe.decide(saved, RemoteFingerprint(etag = "b"), null, 0).change)
 
-        // No saved details and no comparable copy: the website's date versus the install time.
+        // No saved details and no comparable copy: the website's date versus the install time,
+        // trusted only when App Downloader installed the copy from this entry.
         val remote = RemoteFingerprint(lastModified = date, length = 5)
-        val newer = RemoteProbe.decide(null, remote, null, installedAt = dateMs - 3_600_000)
+        val newer = RemoteProbe.decide(null, remote, null, installedAt = dateMs - 3_600_000, installedByThisEntry = true)
         assertEquals(RemoteChange.CHANGED to ChangeReason.DATE, newer.change to newer.reason)
-        val older = RemoteProbe.decide(null, remote, null, installedAt = dateMs + 3_600_000)
+        val older = RemoteProbe.decide(null, remote, null, installedAt = dateMs + 3_600_000, installedByThisEntry = true)
         assertEquals(RemoteChange.UNCHANGED to ChangeReason.DATE, older.change to older.reason)
-        assertEquals(remote, older.newBaseline) // Later checks can compare against it.
+        assertNull(older.newBaseline) // Nothing verified to adopt as a baseline.
         // Within a couple of minutes counts as the same file (clock differences).
-        assertEquals(RemoteChange.UNCHANGED, RemoteProbe.decide(null, remote, null, installedAt = dateMs - 60_000).change)
+        assertEquals(RemoteChange.UNCHANGED, RemoteProbe.decide(null, remote, null, dateMs - 60_000, installedByThisEntry = true).change)
+        // Installed some other way: the install date says nothing about this website's file.
+        val other = RemoteProbe.decide(null, remote, null, installedAt = dateMs + 3_600_000, installedByThisEntry = false)
+        assertEquals(RemoteChange.UNKNOWN to ChangeReason.NO_BASELINE, other.change to other.reason)
     }
 
     @Test

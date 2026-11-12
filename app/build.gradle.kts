@@ -7,10 +7,13 @@ plugins {
 
 // The release workflow sets APP_VERSION_NAME from the git tag (v1.2.3 -> 1.2.3).
 // versionCode is derived from it, so it always increases: 1.2.3 -> 10203.
-val appVersionName: String = System.getenv("APP_VERSION_NAME")?.takeIf { it.isNotBlank() } ?: "1.7.1"
-val appVersionCode: Int = appVersionName.split('.').map { it.toInt() }.let { (major, minor, patch) ->
-    require(minor < 100 && patch < 100) { "minor and patch must be below 100" }
-    major * 10_000 + minor * 100 + patch
+val appVersionName: String = System.getenv("APP_VERSION_NAME")?.takeIf { it.isNotBlank() } ?: "1.8.0"
+val appVersionCode: Int = run {
+    // Same rule as the release workflow: no leading zeros (1.07.1 would collide with 1.7.1).
+    require(Regex("^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]?)\\.(0|[1-9][0-9]?)$").matches(appVersionName)) {
+        "APP_VERSION_NAME must look like 1.2.3 (no leading zeros; minor and patch below 100), got $appVersionName"
+    }
+    appVersionName.split('.').map { it.toInt() }.let { (major, minor, patch) -> major * 10_000 + minor * 100 + patch }
 }
 
 android {
@@ -23,6 +26,8 @@ android {
         targetSdk = 35
         versionCode = appVersionCode
         versionName = appVersionName
+        // CI test builds add "-dev+<commit>" so they can't be mistaken for (or update over) a release.
+        System.getenv("APP_VERSION_SUFFIX")?.takeIf { it.isNotBlank() }?.let { versionNameSuffix = it }
 
         // Repository the app checks for its own updates.
         buildConfigField("String", "UPDATE_REPO", "\"edrock200/androidappdownloader\"")
@@ -44,21 +49,35 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // Smaller downloads (self-updates on TV sticks). The app's own classes are kept as they
+            // are (see proguard-rules.pro); libraries are shrunk using their published rules.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
+    }
+
+    lint {
+        // The app supports Android 5.1: an unguarded newer API is an error, and errors fail the build.
+        abortOnError = true
+        warningsAsErrors = false
     }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions {
-        jvmTarget = "17"
-    }
+
     buildFeatures {
         compose = true
         buildConfig = true
+    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
     }
 }
 
@@ -82,4 +101,5 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling)
 
     testImplementation(libs.junit)
+    testImplementation(libs.okhttp.mockwebserver) // Local fake server: tests never use the real network.
 }

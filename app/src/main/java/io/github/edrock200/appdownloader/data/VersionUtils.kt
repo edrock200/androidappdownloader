@@ -39,14 +39,28 @@ object VersionUtils {
         if (entry.type == SourceType.GITHUB) hasUpdate(entry, installedVersionName, installedVersionCode)
         else linkChanged(entry, installedVersionCode)
 
+    /**
+     * Lowest target SDK Android will install on [sdkInt] (Android 14 blocks apps targeting below 23,
+     * Android 15 below 24). 0 = no limit.
+     */
+    fun minInstallableTargetSdk(sdkInt: Int): Int = when {
+        sdkInt >= 35 -> 24
+        sdkInt >= 34 -> 23
+        else -> 0
+    }
+
     fun hasUpdate(entry: AppEntry, installedVersionName: String?, installedVersionCode: Long?): Boolean {
         val latest = entry.latestTag ?: return false
         if (entry.latestAssetUrl == null) return false
         if (installedVersionCode == null) return false // Not installed: offer "Install", not "Update".
 
-        // If the installed build is the one we installed, the tag tells us exactly.
+        // A tag whose file was already found to be older than what is installed (withdrawn release).
+        if (latest == entry.skippedTag) return false
+
+        // If the installed build is the one we installed, compare tags, and only ever forwards.
         if (entry.installedTag != null && entry.installedVersionCode == installedVersionCode) {
-            return latest != entry.installedTag
+            val c = compare(latest, entry.installedTag)
+            return if (c != null) c > 0 else latest != entry.installedTag
         }
         val cmp = installedVersionName?.let { compare(latest, it) }
         return when {

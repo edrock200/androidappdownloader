@@ -1,0 +1,21 @@
+# Weekly, grouped update proposals for build dependencies and workflow actions.
+# ZXing is held at 3.3.x on purpose: newer versions need Android 7+ (the app supports 5.1).
+version: 2
+updates:
+  - package-ecosystem: gradle
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      gradle-dependencies:
+        patterns: ["*"]
+    ignore:
+      - dependency-name: "com.google.zxing:core"
+        versions: [">=3.4.0"]
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]

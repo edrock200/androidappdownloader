@@ -12,6 +12,7 @@ import android.provider.MediaStore
 import androidx.core.content.ContextCompat
 import com.google.android.gms.common.ConnectionResult
 import com.google.android.gms.common.GoogleApiAvailability
+import io.github.edrock200.appdownloader.data.Backup
 import java.io.File
 import java.io.IOException
 import java.text.SimpleDateFormat
@@ -30,13 +31,31 @@ object BackupStorage {
     fun fileName(now: Long = System.currentTimeMillis()) =
         "$PREFIX-" + SimpleDateFormat("yyyy-MM-dd-HHmm", Locale.US).format(Date(now)) + ".json"
 
-    /** Many TVs (Fire TV, most Android TVs) have no system file picker. */
+    /** Many TVs (Fire TV, most Android TVs) have no system file picker for saving. */
     fun hasFilePicker(context: Context): Boolean {
         val pm = context.packageManager
         val create = Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/json")
         val open = Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
         return create.resolveActivity(pm) != null && open.resolveActivity(pm) != null
     }
+
+    /** Some devices without the full picker still have an app that can hand over a file ("get content"). */
+    fun hasGetContent(context: Context): Boolean =
+        Intent(Intent.ACTION_GET_CONTENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
+            .resolveActivity(context.packageManager) != null
+
+    /** Shown when no backup is found in Downloads. */
+    fun noBackupsMessage(): String = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        "No backups found. On this Android version App Downloader can only see backups it saved itself " +
+            "since it was installed. To use a backup from elsewhere, choose \"Restore from link or aftv.news code\"."
+    } else {
+        "No backups found in Downloads. Save one first, or restore from a link."
+    }
+
+    fun delete(context: Context, backup: StoredBackup): Boolean = runCatching {
+        if (backup.uri.scheme == "file") File(backup.uri.path!!).delete()
+        else context.contentResolver.delete(backup.uri, null, null) > 0
+    }.getOrDefault(false)
 
     /** True when the Downloads fallback first needs the storage permission (Android 6–9). */
     fun needsStoragePermission(context: Context): Boolean =
@@ -58,11 +77,7 @@ object BackupStorage {
 
     fun read(context: Context, uri: Uri): String {
         val input = context.contentResolver.openInputStream(uri) ?: throw IOException("Couldn't open the file")
-        return input.use { stream ->
-            val bytes = stream.readBytes()
-            if (bytes.size > MAX_BYTES) throw IOException("That file is too large to be a backup")
-            bytes.decodeToString()
-        }
+        return input.use { stream -> Backup.readBounded(stream, MAX_BYTES).decodeToString() }
     }
 
     /** Saves to the public Downloads folder. Returns where it was saved, for the message. */

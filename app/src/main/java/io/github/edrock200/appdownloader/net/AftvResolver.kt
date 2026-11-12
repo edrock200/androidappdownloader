@@ -11,7 +11,9 @@ import java.io.IOException
  */
 object AftvResolver {
 
-    private const val RESOLVE_BASE = "https://go.aftvnews.com/"
+    /** Overridable for tests. */
+    @Volatile
+    var resolveBase = "https://go.aftvnews.com/"
     private val SHORT_URL = Regex(
         "^(?:https?://)?(?:www\\.)?(?:aftv\\.news|go\\.aftvnews\\.com)/(\\d{1,10})/?$",
         RegexOption.IGNORE_CASE,
@@ -28,7 +30,7 @@ object AftvResolver {
     fun shortUrl(code: String) = "https://aftv.news/$code"
 
     suspend fun resolve(code: String): String = withContext(Dispatchers.IO) {
-        val request = Request.Builder().url(RESOLVE_BASE + code).get().build()
+        val request = Request.Builder().url(resolveBase + code).get().build()
         Http.execute(request).use { response ->
             val finalUrl = response.request.url
             // The shortener may redirect straight to the target in the future.

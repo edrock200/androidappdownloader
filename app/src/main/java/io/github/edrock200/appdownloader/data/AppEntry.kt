@@ -73,4 +73,24 @@ data class AppEntry(
 
     /** Installs and updates of this app on this device, newest first (see [History]). */
     val history: List<InstallRecord> = emptyList(),
+
+    // ---- Added in 1.8.0 ----
+    /** The waiting download already needed the user's OK once; don't retry it silently. */
+    val readyNeedsUser: Boolean = false,
+    /** A release tag whose file turned out to be older than what is installed (withdrawn release). */
+    val skippedTag: String? = null,
+    /** Version Android refused to install in the background, so scheduled runs don't retry it. */
+    val failedVersionCode: Long? = null,
+    /** Release tag of [failedVersionCode] (GitHub), so scheduled runs can skip it before downloading. */
+    val failedTag: String? = null,
+    /** Last reason an automatic update failed (shown on the card), and when. */
+    val lastUpdateError: String? = null,
+    val lastUpdateErrorAt: Long? = null,
+    /** GitHub API address of the chosen asset (downloads from private repositories with a token). */
+    val latestAssetApiUrl: String? = null,
+    /** Size and checksum GitHub publishes for the chosen asset, to verify the download. */
+    val latestAssetSize: Long? = null,
+    val latestAssetDigest: String? = null,
+    /** Added by restoring a backup and not installed on this device yet ("Install all" offers it). */
+    val pendingInstall: Boolean = false,
 )

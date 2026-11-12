@@ -54,7 +54,10 @@ import io.github.edrock200.appdownloader.net.RemoteChange
 fun EntryCard(
     item: EntryUi,
     onInstall: () -> Unit,
+    onInstallAnyway: () -> Unit,
     onCancel: () -> Unit,
+    canShowPrompt: Boolean,
+    onShowPrompt: () -> Unit,
     onCheck: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
@@ -132,11 +135,6 @@ fun EntryCard(
                 )
                 if (entry.type == SourceType.GITHUB) {
                     when {
-                        entry.lastCheckError != null -> Text(
-                            entry.lastCheckError,
-                            color = MaterialTheme.colorScheme.error,
-                            style = MaterialTheme.typography.bodySmall,
-                        )
                         entry.latestTag != null -> InfoLine(
                             "Latest",
                             buildString {
@@ -146,31 +144,43 @@ fun EntryCard(
                             },
                             highlight = item.hasUpdate,
                         )
-                        else -> InfoLine("Latest", "Not checked yet")
+                        entry.lastCheckError == null -> InfoLine("Latest", "Not checked yet")
                     }
                 } else if (installed != null) {
-                    // Links: has the file on the website changed since the installed copy was downloaded?
+                    // Links: does the file on the website differ from the installed copy?
                     val checked = entry.remoteCheckedAt?.let { " · checked " + relativeTime(it) }.orEmpty()
                     when {
-                        entry.lastCheckError != null -> Text(
-                            entry.lastCheckError,
-                            color = MaterialTheme.colorScheme.error,
-                            style = MaterialTheme.typography.bodySmall,
-                        )
                         entry.remoteChange == RemoteChange.CHANGED ->
                             InfoLine("File", "Newer file on the website$checked", highlight = true)
                         entry.remoteChange == RemoteChange.UNCHANGED ->
                             InfoLine(
                                 "File",
-                                (if (entry.remoteReason == ChangeReason.CONTENT) "Same as your installed copy"
-                                else "No change since you installed it") + checked,
+                                when (entry.remoteReason) {
+                                    ChangeReason.CONTENT -> "Same as your installed copy"
+                                    ChangeReason.NOT_NEWER -> "The website's file isn't newer than your installed copy"
+                                    else -> "No change since you installed it"
+                                } + checked,
                             )
                         entry.remoteChange == RemoteChange.UNKNOWN && entry.remoteReason == ChangeReason.NO_BASELINE ->
                             InfoLine("File", "Can't compare yet: update or reinstall it once from here$checked")
                         entry.remoteChange == RemoteChange.UNKNOWN ->
                             InfoLine("File", "This website doesn't give file details, so changes can't be seen$checked")
-                        else -> InfoLine("File", "Not checked yet")
+                        entry.lastCheckError == null -> InfoLine("File", "Not checked yet")
                     }
+                }
+                // A failed check is shown below the last known result, not instead of it.
+                entry.lastCheckError?.let {
+                    Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                }
+                entry.lastUpdateError?.let {
+                    Text("Last automatic update failed: $it", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                }
+                if (item.insecure) {
+                    Text(
+                        "Unencrypted (http) link: the file could be swapped on the way. Use an https link if the site has one.",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
                 }
 
                 if (item.waiting) {
@@ -210,31 +220,35 @@ fun EntryCard(
 
                 Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    when {
-                        busy -> OutlinedButton(onClick = onCancel, modifier = Modifier.focusHighlight()) { Text(if (op == OpState.Installing) "Dismiss" else "Cancel") }
-                        else -> Button(onClick = onInstall, modifier = Modifier.focusHighlight()) {
-                            Text(
-                                when {
-                                    item.waiting -> "Install update" + (entry.readyVersionName?.let { " $it" } ?: "")
-                                    item.hasUpdate -> "Update"
-                                    installed == null -> "Install"
-                                    entry.type == SourceType.GITHUB -> "Reinstall"
-                                    else -> "Re-download"
-                                },
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
+                    // One stable button that switches between Install/Update and Cancel, so a TV remote's
+                    // focus stays on it instead of jumping to the top of the screen.
+                    Button(onClick = { if (busy) onCancel() else onInstall() }, modifier = Modifier.focusHighlight()) {
+                        Text(
+                            when {
+                                busy -> if (op == OpState.Installing) "Dismiss" else "Cancel"
+                                item.waiting -> "Install update" + (entry.readyVersionName?.let { " $it" } ?: "")
+                                item.hasUpdate -> "Update"
+                                installed == null -> "Install"
+                                entry.type == SourceType.GITHUB -> "Reinstall"
+                                else -> "Re-download"
+                            },
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
                     }
-                    if (installed != null && entry.packageName != null && !busy &&
-                        SystemActions.canLaunch(context, entry.packageName)
-                    ) {
+                    if (op == OpState.Installing && canShowPrompt) {
+                        TextButton(onClick = onShowPrompt, modifier = Modifier.focusHighlight()) { Text("Show prompt") }
+                    }
+                    if (installed != null && entry.packageName != null && !busy && item.canLaunch) {
                         OutlinedButton(
                             onClick = { SystemActions.launchApp(context, entry.packageName) },
                             modifier = Modifier.focusHighlight(),
                         ) { Text("Open") }
                     }
                     if (op is OpState.Failed) {
+                        if (op.differentApp != null) {
+                            TextButton(onClick = onInstallAnyway, modifier = Modifier.focusHighlight()) { Text("Install anyway") }
+                        }
                         op.openUrl?.takeIf { hasBrowser }?.let { url ->
                             TextButton(modifier = Modifier.focusHighlight(), onClick = {
                                 if (!SystemActions.openUrl(context, url)) onMessage("No browser available")
@@ -284,7 +298,12 @@ private fun OverflowMenu(
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             if (entry.type == SourceType.GITHUB || item.installed != null) {
-                DropdownMenuItem(text = { Text("Check for update") }, modifier = itemModifier, onClick = { open = false; onCheck() })
+                DropdownMenuItem(
+                    text = { Text("Check for update") },
+                    modifier = itemModifier,
+                    enabled = item.op == null || item.op is OpState.Failed,
+                    onClick = { open = false; onCheck() },
+                )
             }
             if (entry.type == SourceType.GITHUB && hasBrowser) {
                 DropdownMenuItem(text = { Text("Open release page") }, modifier = itemModifier, onClick = {
@@ -318,19 +337,19 @@ fun UpdateStar(modifier: Modifier = Modifier) {
     Icon(
         Icons.Filled.Star,
         contentDescription = "Update available",
-        tint = Color(0xFFFFB300),
+        tint = MaterialTheme.colorScheme.tertiary,
         modifier = modifier.size(20.dp),
     )
 }
 
 @Composable
 private fun TypeBadge(type: SourceType) {
-    val (label, color) = when (type) {
-        SourceType.URL -> "Link" to MaterialTheme.colorScheme.secondaryContainer
-        SourceType.AFTV_CODE -> "aftv.news" to MaterialTheme.colorScheme.primaryContainer
-        SourceType.GITHUB -> "GitHub" to Color(0xFF24292F)
+    val scheme = MaterialTheme.colorScheme
+    val (label, color, textColor) = when (type) {
+        SourceType.URL -> Triple("Link", scheme.secondaryContainer, scheme.onSecondaryContainer)
+        SourceType.AFTV_CODE -> Triple("aftv.news", scheme.primaryContainer, scheme.onPrimaryContainer)
+        SourceType.GITHUB -> Triple("GitHub", Color(0xFF24292F), Color.White)
     }
-    val textColor = if (type == SourceType.GITHUB) Color.White else MaterialTheme.colorScheme.onSurface
     Surface(color = color, shape = MaterialTheme.shapes.small) {
         Text(
             label,

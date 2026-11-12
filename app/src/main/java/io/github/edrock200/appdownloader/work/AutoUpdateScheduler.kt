@@ -1,6 +1,7 @@
 package io.github.edrock200.appdownloader.work
 
 import android.content.Context
+import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
@@ -13,11 +14,19 @@ import java.util.concurrent.TimeUnit
 object AutoUpdateScheduler {
     private const val WORK_NAME = "scheduled-update-all"
 
+    /** Network (Wi-Fi only if chosen), battery and storage conditions for scheduled downloads. */
+    fun constraints(state: SettingsState): Constraints = Constraints.Builder()
+        .setRequiredNetworkType(if (state.wifiOnly) NetworkType.UNMETERED else NetworkType.CONNECTED)
+        .setRequiresBatteryNotLow(true)
+        .setRequiresStorageNotLow(true)
+        .build()
+
     /**
-     * Enqueues (or cancels) the next run. [fromWorker] is true when called by the run that is
-     * just finishing, so the next one is queued behind it instead of cancelling it.
+     * Enqueues (or cancels) the next run. [fromWorker] is true when called by the run that is in
+     * progress, so the next one is queued behind it instead of cancelling it. [keepExisting] only
+     * re-creates a missing job (used at app start, e.g. after a device transfer).
      */
-    fun apply(context: Context, state: SettingsState, fromWorker: Boolean = false) {
+    fun apply(context: Context, state: SettingsState, fromWorker: Boolean = false, keepExisting: Boolean = false) {
         val wm = WorkManager.getInstance(context)
         if (!state.hasSchedule) {
             if (!fromWorker) wm.cancelUniqueWork(WORK_NAME)
@@ -26,9 +35,14 @@ object AutoUpdateScheduler {
         val delay = (state.scheduleAt - System.currentTimeMillis()).coerceAtLeast(0)
         val request = OneTimeWorkRequestBuilder<AutoUpdateWorker>()
             .setInitialDelay(delay, TimeUnit.MILLISECONDS)
-            .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+            .setConstraints(constraints(state))
+            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 10, TimeUnit.MINUTES)
             .build()
-        val policy = if (fromWorker) ExistingWorkPolicy.APPEND_OR_REPLACE else ExistingWorkPolicy.REPLACE
+        val policy = when {
+            fromWorker -> ExistingWorkPolicy.APPEND_OR_REPLACE
+            keepExisting -> ExistingWorkPolicy.KEEP
+            else -> ExistingWorkPolicy.REPLACE
+        }
         wm.enqueueUniqueWork(WORK_NAME, policy, request)
     }
 }

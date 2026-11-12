@@ -37,5 +37,6 @@ if [ "${DRY_RUN:-}" = "1" ]; then
   printf '%s\n' "$payload"
   exit 0
 fi
-curl --fail-with-body -sS -H "Content-Type: application/json" -d "$payload" "$DISCORD_WEBHOOK"
+curl --fail-with-body -sS --retry 3 --retry-delay 5 --retry-all-errors \
+  -H "Content-Type: application/json" -d "$payload" "$DISCORD_WEBHOOK"
 echo "Posted release announcement to Discord."

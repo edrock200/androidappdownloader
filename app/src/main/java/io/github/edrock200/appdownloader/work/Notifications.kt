@@ -19,6 +19,7 @@ import io.github.edrock200.appdownloader.ui.MainActivity
 object Notifications {
     private const val CHANNEL_UPDATES = "updates"
     private const val ID_UPDATES = 1
+    private const val KEY_WAITING = "waiting_key"
     private const val ID_WAITING = 2
     private const val ID_FAILED = 3
     private const val ID_UPDATED_BASE = 1000
@@ -33,12 +34,15 @@ object Notifications {
         context.getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
     }
 
-    fun showUpdates(context: Context, updates: List<AppEntry>) {
-        if (updates.isEmpty()) return
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
-            PackageManager.PERMISSION_GRANTED
-        ) return
+    /** Whether notifications can be shown at all (Android 13+ needs the user's permission). */
+    fun canPost(context: Context): Boolean =
+        NotificationManagerCompat.from(context).areNotificationsEnabled() &&
+            (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED)
+
+    /** Shows the "updates available" notification. Returns false if it couldn't be shown. */
+    fun showUpdates(context: Context, updates: List<AppEntry>): Boolean {
+        if (updates.isEmpty() || !canPost(context)) return false
 
         val open = PendingIntent.getActivity(
             context,
@@ -57,15 +61,26 @@ object Notifications {
             .setContentIntent(open)
             .setAutoCancel(true)
             .build()
-        NotificationManagerCompat.from(context).notify(ID_UPDATES, notification)
+        return try {
+            NotificationManagerCompat.from(context).notify(ID_UPDATES, notification)
+            true
+        } catch (e: SecurityException) {
+            false // Permission withdrawn between the check and here.
+        }
     }
 
     /** "Updates downloaded, open the app to finish installing" (or clears it when [entries] is empty). */
     fun showWaitingUpdates(context: Context, entries: List<AppEntry>) {
+        val prefs = context.getSharedPreferences("notifications", Context.MODE_PRIVATE)
         if (entries.isEmpty()) {
             NotificationManagerCompat.from(context).cancel(ID_WAITING)
+            prefs.edit().remove(KEY_WAITING).apply()
             return
         }
+        // Only post again when something new is waiting, so recurring schedules don't alert every run.
+        val key = entries.map { "${it.id}:${it.readyVersionCode ?: it.readyFile}" }.sorted().joinToString(",")
+        if (prefs.getString(KEY_WAITING, null) == key) return
+        prefs.edit().putString(KEY_WAITING, key).apply()
         val title = if (entries.size == 1) "Update ready: ${entries[0].name}" else "${entries.size} updates ready to install"
         val text = "Open App Downloader to finish installing" +
             if (entries.size > 1) ": " + entries.joinToString(", ") { it.name } else ""
@@ -105,6 +120,7 @@ object Notifications {
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setContentIntent(open)
             .setAutoCancel(true)
+            .setOnlyAlertOnce(true)
             .build()
         NotificationManagerCompat.from(context).notify(id, notification)
     }

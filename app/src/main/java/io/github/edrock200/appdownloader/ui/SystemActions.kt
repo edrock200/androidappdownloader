@@ -10,8 +10,17 @@ import android.provider.Settings
 /** Small helpers that hand off to the system or other apps. */
 object SystemActions {
 
-    fun canInstallPackages(context: Context): Boolean =
-        Build.VERSION.SDK_INT < Build.VERSION_CODES.O || context.packageManager.canRequestPackageInstalls()
+    /**
+     * Android 8+: the per-app "Install unknown apps" permission. Older versions (old Fire TVs) have
+     * one system-wide "Unknown sources" switch; if it can't be read, assume installs are allowed.
+     */
+    fun canInstallPackages(context: Context): Boolean = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        context.packageManager.canRequestPackageInstalls()
+    } else {
+        @Suppress("DEPRECATION")
+        runCatching { Settings.Secure.getInt(context.contentResolver, Settings.Secure.INSTALL_NON_MARKET_APPS) == 1 }
+            .getOrDefault(true)
+    }
 
     /** Opens the "Install unknown apps" screen for this app (or the closest available settings page). */
     fun openInstallPermissionSettings(context: Context): Boolean {

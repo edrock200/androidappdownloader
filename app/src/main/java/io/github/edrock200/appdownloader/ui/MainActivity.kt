@@ -38,8 +38,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        // Apps may have been installed/removed while we were away.
+        // Apps may have been installed/removed, and the install permission changed, while we were away.
         viewModel.refreshInstalled()
+        // An install prompt dismissed without an answer leaves no result; free those cards.
+        viewModel.reconcileSessions()
     }
 
     private fun handleIntent(intent: Intent?) {

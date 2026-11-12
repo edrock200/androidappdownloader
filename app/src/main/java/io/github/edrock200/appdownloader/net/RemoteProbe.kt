@@ -8,6 +8,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.Request
 import okhttp3.Response
 import java.io.File
+import java.io.IOException
 import java.io.RandomAccessFile
 import java.security.MessageDigest
 import java.text.SimpleDateFormat
@@ -27,11 +28,28 @@ data class RemoteFingerprint(
      * zip directory, which change whenever anything in the app changes, so this identifies the file.
      */
     val tailHash: String? = null,
+    /**
+     * Set when this file was downloaded and found to be the same version or older than what is
+     * installed: while the website keeps serving it, it is not an update.
+     */
+    val notNewer: Boolean = false,
 ) {
     val isEmpty get() = etag == null && lastModified == null && length == null && path == null && tailHash == null
 
-    /** Stable text form, used to avoid notifying twice about the same change. */
-    val key get() = listOf(etag, lastModified, length, path, tailHash).joinToString("|")
+    /** True when there is more than the address to go on. */
+    val hasFileDetails get() = etag != null || lastModified != null || length != null || tailHash != null
+
+    /**
+     * Stable identity of the file, used to avoid notifying twice about the same change. Uses the
+     * strongest signal only, so mirrors and occasional range failures don't look like new files.
+     */
+    val key get() = when {
+        tailHash != null -> "t:$tailHash"
+        etag != null -> "e:$etag|${length ?: ""}"
+        lastModified != null -> "m:$lastModified"
+        length != null -> "l:$length"
+        else -> "p:${path.orEmpty()}"
+    }
 }
 
 @Serializable
@@ -50,6 +68,8 @@ enum class ChangeReason {
     NO_DETAILS,
     /** The website gives details, but there is nothing to compare them with yet. */
     NO_BASELINE,
+    /** The website's file differs from the installed copy but was already found to be the same version or older. */
+    NOT_NEWER,
 }
 
 /** The installed APK, for comparing with the website's file. */
@@ -75,19 +95,27 @@ object RemoteProbe {
      * useful is available.
      */
     suspend fun fingerprint(url: String): RemoteFingerprint? = withContext(Dispatchers.IO) {
-        probe(url, followPage = true)
+        probe(LinkNormalizer.normalize(url), followPage = true)
     }
 
+    /**
+     * Throws when the website can't be reached at all (offline, server errors), so a failed check
+     * is reported as a failure instead of looking like a changed file.
+     */
     private suspend fun probe(url: String, followPage: Boolean): RemoteFingerprint? {
+        var failure: Throwable? = null
         val head = runCatching {
             Http.execute(Request.Builder().url(url).head().build()).use { HeaderResult.of(it) }
-        }.getOrNull()
-        val headers = if (head?.fingerprint != null || head?.isPage == true) {
+        }.onFailure { failure = it }.getOrNull()
+        val headers = if (head?.fingerprint?.hasFileDetails == true || head?.isPage == true) {
             head
         } else {
             runCatching {
                 Http.execute(Request.Builder().url(url).header("Range", "bytes=0-0").get().build()).use { HeaderResult.of(it) }
-            }.getOrNull()
+            }.onFailure { failure = it }.getOrNull() ?: head
+        }
+        if (headers == null) {
+            throw (failure as? IOException) ?: IOException("The website didn't respond to the check", failure)
         }
 
         if (headers?.isPage == true) {
@@ -96,8 +124,8 @@ object RemoteProbe {
             return probe(apkUrl, followPage = false)
         }
 
-        val target = headers?.finalUrl ?: url
-        val base = headers?.fingerprint ?: RemoteFingerprint(path = pathOf(target))
+        val target = headers.finalUrl
+        val base = headers.fingerprint ?: RemoteFingerprint(path = pathOf(target))
         val tail = runCatching { fetchTail(target, base.length) }.getOrNull()
         val fp = if (tail != null) base.copy(tailHash = tail.hash, length = base.length ?: tail.totalLength) else base
         return fp.takeIf { !it.isEmpty }
@@ -106,7 +134,10 @@ object RemoteProbe {
     private class HeaderResult(val fingerprint: RemoteFingerprint?, val isPage: Boolean, val finalUrl: String) {
         companion object {
             fun of(response: Response): HeaderResult? {
-                if (!response.isSuccessful) return null
+                if (!response.isSuccessful) {
+                    if (response.code >= 500) throw IOException("The website returned an error (HTTP ${response.code})")
+                    return null
+                }
                 val type = response.header("Content-Type")
                 val finalUrl = response.request.url.toString()
                 return HeaderResult(
@@ -244,28 +275,33 @@ object RemoteProbe {
         remote: RemoteFingerprint?,
         installed: LocalApk?,
         installedAt: Long,
+        installedByThisEntry: Boolean = saved != null,
     ): ChangeDecision {
         if (remote == null) return ChangeDecision(RemoteChange.UNKNOWN, ChangeReason.NO_DETAILS)
+        // The website still serves a file that was already downloaded and found not to be newer.
+        val knownNotNewer = saved?.notNewer == true && compare(saved, remote) == RemoteChange.UNCHANGED
 
         if (remote.tailHash != null && installed != null) {
             val same = remote.tailHash == installed.tailHash && (remote.length == null || remote.length == installed.length)
-            return if (same) {
-                ChangeDecision(RemoteChange.UNCHANGED, ChangeReason.CONTENT, newBaseline = remote)
-            } else {
-                ChangeDecision(RemoteChange.CHANGED, ChangeReason.CONTENT)
+            return when {
+                same -> ChangeDecision(RemoteChange.UNCHANGED, ChangeReason.CONTENT, newBaseline = remote)
+                knownNotNewer -> ChangeDecision(RemoteChange.UNCHANGED, ChangeReason.NOT_NEWER)
+                else -> ChangeDecision(RemoteChange.CHANGED, ChangeReason.CONTENT)
             }
         }
+        if (knownNotNewer) return ChangeDecision(RemoteChange.UNCHANGED, ChangeReason.NOT_NEWER)
 
         val bySaved = compare(saved, remote)
         if (bySaved != RemoteChange.UNKNOWN) return ChangeDecision(bySaved, ChangeReason.SAVED_DETAILS)
 
         val modified = parseHttpDate(remote.lastModified)
-        if (modified != null && installedAt > 0) {
+        // The install date only says something about this website's file if App Downloader installed it.
+        if (modified != null && installedAt > 0 && installedByThisEntry) {
             // A file last changed before the app was installed is the one that was installed (or older).
             return if (modified > installedAt + DATE_SLACK_MS) {
                 ChangeDecision(RemoteChange.CHANGED, ChangeReason.DATE)
             } else {
-                ChangeDecision(RemoteChange.UNCHANGED, ChangeReason.DATE, newBaseline = saved ?: remote)
+                ChangeDecision(RemoteChange.UNCHANGED, ChangeReason.DATE, newBaseline = saved)
             }
         }
         return ChangeDecision(

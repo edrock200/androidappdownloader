@@ -61,8 +61,12 @@ object Device {
 
     /** Where the user finds the "install unknown apps" switch on this kind of device. */
     fun installPermissionHelp(context: Context): String = when {
+        isFireTv(context) && android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.O ->
+            "On Fire TV: Settings › My Fire TV › Developer options › turn on \"Apps from Unknown Sources\"."
         isFireTv(context) ->
             "On Fire TV: Settings › My Fire TV › Developer options › Install unknown apps › App Downloader."
+        android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.O ->
+            "Open Settings › Security (or Security & restrictions) and turn on \"Unknown sources\"."
         isTv(context) ->
             "On Android TV / Google TV: Settings › Apps › Security & restrictions › Unknown sources › " +
                 "App Downloader. (Older models: Settings › Device Preferences › Security & restrictions.)"

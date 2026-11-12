@@ -2,6 +2,12 @@ package io.github.edrock200.appdownloader.data
 
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonPrimitive
+import java.io.IOException
+import java.io.InputStream
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.util.zip.GZIPInputStream
@@ -48,7 +54,13 @@ data class BackupFile(
     }
 }
 
-data class RestoreResult(val entries: List<AppEntry>, val added: Int, val skipped: Int)
+data class RestoreResult(
+    val entries: List<AppEntry>,
+    val added: Int,
+    val skipped: Int,
+    /** Apps left out because their source wasn't a valid link, code or repository. */
+    val invalid: Int = 0,
+)
 
 /** Turns the user's list and settings into a backup and back (pure, for tests). */
 object Backup {
@@ -57,6 +69,24 @@ object Backup {
         ignoreUnknownKeys = true
         encodeDefaults = true
         prettyPrint = true
+        coerceInputValues = true
+    }
+
+    /** Largest backup accepted (files, links and the unpacked QR payload). */
+    const val MAX_BYTES = 2 * 1024 * 1024
+    const val MAX_APPS = 500
+
+    /** Reads at most [max] bytes; a longer stream is rejected instead of filling memory. */
+    fun readBounded(input: InputStream, max: Int = MAX_BYTES): ByteArray {
+        val out = ByteArrayOutputStream()
+        val buffer = ByteArray(16 * 1024)
+        while (true) {
+            val n = input.read(buffer)
+            if (n < 0) break
+            out.write(buffer, 0, n)
+            if (out.size() > max) throw IOException("That file is too large to be a backup")
+        }
+        return out.toByteArray()
     }
     private val compactJson = Json(json) { prettyPrint = false; encodeDefaults = false }
 
@@ -115,24 +145,31 @@ object Backup {
     @OptIn(ExperimentalEncodingApi::class)
     fun parse(text: String): BackupFile {
         val trimmed = text.trim()
+        if (trimmed.length > MAX_BYTES) throw IllegalArgumentException("That file is too large to be a backup")
         val jsonText = if (trimmed.startsWith(QR_PREFIX)) {
-            val bytes = try {
-                Base64.UrlSafe.decode(trimmed.removePrefix(QR_PREFIX))
-            } catch (e: IllegalArgumentException) {
-                throw IllegalArgumentException("This QR code isn't an App Downloader backup")
+            try {
+                val bytes = Base64.UrlSafe.decode(trimmed.removePrefix(QR_PREFIX))
+                GZIPInputStream(ByteArrayInputStream(bytes)).use { readBounded(it) }.decodeToString()
+            } catch (e: Exception) {
+                throw IllegalArgumentException("This QR code isn't an App Downloader backup (or it's damaged)")
             }
-            GZIPInputStream(ByteArrayInputStream(bytes)).use { it.readBytes() }.decodeToString()
         } else {
             trimmed
         }
-        val backup = try {
-            json.decodeFromString(BackupFile.serializer(), jsonText)
-        } catch (e: Exception) {
+        // Check what it is before decoding everything, so newer formats get an accurate message.
+        val header = runCatching { json.parseToJsonElement(jsonText) as? JsonObject }.getOrNull()
+            ?: throw IllegalArgumentException("This isn't an App Downloader backup")
+        if (header["format"]?.jsonPrimitive?.contentOrNull != BackupFile.FORMAT) {
             throw IllegalArgumentException("This isn't an App Downloader backup")
         }
-        require(backup.format == BackupFile.FORMAT) { "This isn't an App Downloader backup" }
-        require(backup.version <= 1) { "This backup was made by a newer App Downloader. Update the app first." }
-        return backup
+        if ((header["version"]?.jsonPrimitive?.intOrNull ?: 1) > 1) {
+            throw IllegalArgumentException("This backup was made by a newer App Downloader. Update the app first.")
+        }
+        return try {
+            json.decodeFromJsonElement(BackupFile.serializer(), header)
+        } catch (e: Exception) {
+            throw IllegalArgumentException("This backup is damaged and can't be read")
+        }
     }
 
     /**
@@ -140,37 +177,54 @@ object Backup {
      * list when [replace] is true. Restored apps start fresh: release and install details are
      * re-learned on this device.
      */
-    fun restoreApps(existing: List<AppEntry>, backup: BackupFile, replace: Boolean): RestoreResult {
+    fun restoreApps(existing: List<AppEntry>, backup: BackupFile, replace: Boolean, trusted: Boolean = true): RestoreResult {
         val base = if (replace) emptyList() else existing
         val result = base.toMutableList()
         var added = 0
         var skipped = 0
-        for (app in backup.apps) {
-            if (result.any { it.type == app.type && it.source.equals(app.source, ignoreCase = true) }) {
+        var invalid = 0
+        for (raw in backup.apps.take(MAX_APPS)) {
+            // Only accept sources that parse as what they claim to be, and keep strings to sane sizes.
+            val parsed = SourceParser.parse(if (raw.type == SourceType.GITHUB) "github:${raw.source}" else raw.source.take(2000))
+            if (parsed == null || parsed.type != raw.type) {
+                invalid++
+                continue
+            }
+            val app = raw.copy(
+                name = raw.name.take(200).ifBlank { parsed.suggestedName },
+                source = parsed.source,
+                assetFilter = raw.assetFilter?.take(200),
+                packageName = raw.packageName?.take(255),
+            )
+            if (result.any { it.type == app.type && SourceParser.sameSource(app.type, it.source, app.source) }) {
                 skipped++
                 continue
             }
             // Keep the existing entry (and its download history) when replacing with the same source.
-            val previous = existing.firstOrNull { it.type == app.type && it.source.equals(app.source, ignoreCase = true) }
-            result += (previous ?: AppEntry(name = app.name, type = app.type, source = app.source)).copy(
+            val previous = existing.firstOrNull { it.type == app.type && SourceParser.sameSource(app.type, it.source, app.source) }
+            result += (previous ?: AppEntry(name = app.name, type = app.type, source = app.source, pendingInstall = true)).copy(
                 name = app.name,
                 autoName = app.autoName,
-                packageName = app.packageName ?: previous?.packageName,
+                // A backup from someone else can't say which installed app an entry controls.
+                packageName = if (trusted) app.packageName ?: previous?.packageName else previous?.packageName,
                 includePrereleases = app.includePrereleases,
                 assetFilter = app.assetFilter,
                 autoUpdate = app.autoUpdate,
             )
             added++
         }
-        return RestoreResult(result, added, skipped)
+        return RestoreResult(result, added, skipped, invalid)
     }
 
     /** Applies the backup's settings. A token is only replaced if the backup contains one. */
-    fun restoreSettings(current: SettingsState, backup: BackupSettings, now: Long): SettingsState {
+    fun restoreSettings(current: SettingsState, backup: BackupSettings, now: Long, includeToken: Boolean = true): SettingsState {
         val next = if (backup.scheduleAt > 0) Schedule.nextRun(backup.scheduleAt, backup.scheduleRepeat, now) else null
+        val (minute, weekday) = next?.let { Schedule.localTimeOf(it) } ?: (-1 to 0)
         return current.copy(
-            githubToken = backup.githubToken ?: current.githubToken,
-            checkIntervalHours = backup.checkIntervalHours,
+            githubToken = backup.githubToken?.takeIf { includeToken }?.take(500) ?: current.githubToken,
+            checkIntervalHours = backup.checkIntervalHours.takeIf { it in Settings.INTERVAL_OPTIONS } ?: current.checkIntervalHours,
+            scheduleMinuteOfDay = minute,
+            scheduleWeekday = weekday,
             deleteApkAfterInstall = backup.deleteApkAfterInstall,
             checkSelfUpdates = backup.checkSelfUpdates,
             scheduleAt = next ?: 0,

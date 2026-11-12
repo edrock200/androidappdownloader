@@ -97,6 +97,50 @@ class BackupTest {
     }
 
     @Test
+    fun hardenedReading() {
+        try {
+            Backup.readBounded(java.io.ByteArrayInputStream(ByteArray(Backup.MAX_BYTES + 1)))
+            fail("oversized input must be refused")
+        } catch (e: java.io.IOException) {
+            assertTrue(e.message!!.contains("too large"))
+        }
+        try {
+            Backup.parse("""{"format":"app-downloader-backup","version":7,"apps":[{"surprise":true}]}""")
+            fail("newer format")
+        } catch (e: IllegalArgumentException) {
+            assertTrue(e.message!!.contains("newer"))
+        }
+        try {
+            Backup.parse(Backup.QR_PREFIX + "H4sIAAAAAAAA") // Truncated gzip.
+            fail("damaged QR")
+        } catch (e: IllegalArgumentException) {
+            assertTrue(e.message!!.contains("damaged") || e.message!!.contains("isn't"))
+        }
+    }
+
+    @Test
+    fun untrustedBackupsAreChecked() {
+        val bad = Backup.create(
+            listOf(
+                AppEntry(name = "Ok", type = SourceType.URL, source = "https://ok.example/a.apk", packageName = "com.bank.app"),
+                AppEntry(name = "Broken", type = SourceType.URL, source = "javascript:alert(1)"),
+            ),
+            SettingsState(checkIntervalHours = 7), includeToken = false, appVersion = null, now = now,
+        )
+        val r = Backup.restoreApps(emptyList(), bad, replace = false, trusted = false)
+        assertEquals(1, r.added)
+        assertEquals(1, r.invalid)
+        // Someone else's backup can't decide which installed app an entry controls.
+        assertNull(r.entries.single().packageName)
+        assertTrue(r.entries.single().pendingInstall)
+        // Out-of-range values are not taken over.
+        assertEquals(12, Backup.restoreSettings(SettingsState(), bad.settings, now).checkIntervalHours)
+        // The token is only replaced when asked.
+        val withToken = Backup.create(entries, settings, includeToken = true, appVersion = null, now = now)
+        assertEquals("mine", Backup.restoreSettings(SettingsState(githubToken = "mine"), withToken.settings, now, includeToken = false).githubToken)
+    }
+
+    @Test
     fun settingsRestoreKeepsTokenWhenBackupHasNoneAndMovesPastSchedules() {
         val current = SettingsState(githubToken = "mine")
         val backup = Backup.create(entries, settings.copy(scheduleAt = now - 3_600_000 * 5), includeToken = false, appVersion = null, now = now)

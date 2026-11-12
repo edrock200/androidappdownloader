@@ -5,6 +5,9 @@ object AssetSelector {
 
     private val INSTALLABLE = listOf(".apk", ".apks", ".xapk")
     private val ARM32_BARE = Regex("(^|[^a-z0-9])(arm|arm32|armhf|armv7a?)([^a-z0-9]|$)")
+    private val TV_WORDS = Regex("(^|[^a-z0-9])(tv|androidtv|android-tv|leanback|firetv|fire-tv)([^a-z0-9]|$)")
+    private val DEBUG_WORDS = Regex("(^|[^a-z0-9])(debug|unsigned|androidtest|test)([^a-z0-9]|$)")
+    private val RELEASE_WORDS = Regex("(^|[^a-z0-9])release([^a-z0-9]|$)")
 
     fun isInstallable(name: String) = INSTALLABLE.any { name.lowercase().endsWith(it) }
 
@@ -20,7 +23,21 @@ object AssetSelector {
         }
     }
 
-    fun select(assets: List<GhAsset>, filter: String?, supportedAbis: List<String>): GhAsset? {
+    /** Name with numbers blanked, so "app-1.2.apk" and "app-1.3.apk" look alike. */
+    private fun shape(name: String) = name.lowercase().replace(Regex("\\d+"), "#")
+
+    /**
+     * Chooses the asset to install. The device's ABI matters most; after that release builds beat
+     * debug/test builds, TV builds are preferred on TVs (and avoided on phones), and a file named
+     * like the one chosen last time wins ties.
+     */
+    fun select(
+        assets: List<GhAsset>,
+        filter: String?,
+        supportedAbis: List<String>,
+        isTv: Boolean = false,
+        previousName: String? = null,
+    ): GhAsset? {
         var candidates = assets.filter { isInstallable(it.name) }
         if (!filter.isNullOrBlank()) {
             val regex = runCatching { Regex(filter, RegexOption.IGNORE_CASE) }.getOrNull()
@@ -32,13 +49,18 @@ object AssetSelector {
 
         val abis = supportedAbis.map { if (it == "armeabi") "armeabi-v7a" else it }.distinct()
         fun score(asset: GhAsset): Int {
-            val abi = detectAbi(asset.name)
+            val n = asset.name.lowercase()
+            val abi = detectAbi(n)
             var s = when {
-                abi == null -> if ("universal" in asset.name.lowercase()) 60 else 50
+                abi == null -> if ("universal" in n) 60 else 50
                 abi in abis -> 100 - abis.indexOf(abi) * 10
-                else -> -1 // Built for an ABI this device can't run.
+                else -> return -1 // Built for an ABI this device can't run.
             }
-            if (s >= 0 && asset.name.lowercase().endsWith(".apk")) s += 1 // Prefer plain APKs over bundles.
+            if (n.endsWith(".apk")) s += 1 // Prefer plain APKs over bundles.
+            if (DEBUG_WORDS.containsMatchIn(n)) s -= 5
+            if (RELEASE_WORDS.containsMatchIn(n)) s += 3
+            if (TV_WORDS.containsMatchIn(n)) s += if (isTv) 4 else -4
+            if (previousName != null && shape(n) == shape(previousName)) s += 2
             return s
         }
         val best = candidates.maxByOrNull(::score) ?: return null

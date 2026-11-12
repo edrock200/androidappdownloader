@@ -55,6 +55,34 @@ object Schedule {
         return n
     }
 
+    /** Local minutes after midnight and day of week (Calendar.DAY_OF_WEEK) of [at]. */
+    fun localTimeOf(at: Long, zone: TimeZone = TimeZone.getDefault()): Pair<Int, Int> {
+        val cal = Calendar.getInstance(zone).apply { timeInMillis = at }
+        return (cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE)) to cal.get(Calendar.DAY_OF_WEEK)
+    }
+
+    /**
+     * Next run of a daily/weekly schedule from its local wall-clock time, so it stays at e.g. 3:00
+     * after a time-zone change. Returns null for other repeat types or when no local time is stored.
+     */
+    fun nextLocal(minuteOfDay: Int, weekday: Int, repeat: Repeat, now: Long, zone: TimeZone = TimeZone.getDefault()): Long? {
+        if (minuteOfDay < 0 || (repeat != Repeat.DAILY && repeat != Repeat.WEEKLY)) return null
+        val cal = Calendar.getInstance(zone).apply {
+            timeInMillis = now
+            set(Calendar.HOUR_OF_DAY, minuteOfDay / 60)
+            set(Calendar.MINUTE, minuteOfDay % 60)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+        if (repeat == Repeat.WEEKLY && weekday in Calendar.SUNDAY..Calendar.SATURDAY) {
+            while (cal.get(Calendar.DAY_OF_WEEK) != weekday) cal.add(Calendar.DAY_OF_YEAR, 1)
+            if (cal.timeInMillis <= now) cal.add(Calendar.WEEK_OF_YEAR, 1)
+        } else {
+            if (cal.timeInMillis <= now) cal.add(Calendar.DAY_OF_YEAR, 1)
+        }
+        return cal.timeInMillis
+    }
+
     /** Default suggestion: the next 3:00 AM. */
     fun defaultTime(now: Long, zone: TimeZone = TimeZone.getDefault()): Long {
         val today = atTime(now, 3, 0, zone)

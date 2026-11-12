@@ -14,7 +14,8 @@ installing them in one tap. It understands three kinds of sources:
 - Saved list of apps with installed version, latest GitHub release and an **Update** button when a newer release exists.
   Every time the app is opened it checks all apps; ones with an update get a gold ★ and an
   **Update all** button appears at the top of the list.
-- Background checks for new GitHub releases (every 3/6/12/24 hours, or manual only) with a notification listing available updates.
+- Background checks for updates to every app, GitHub releases and changed link files alike
+  (every 3/6/12/24 hours, or manual only), with a notification listing available updates.
 - Picks the right release asset for the device's CPU (arm64-v8a, armeabi-v7a, x86, x86_64, universal). An optional per-repo filter (text or regex, e.g. `universal` or `fdroid.*\.apk`) handles repos with several flavours; pre-releases can be included per repo.
 - Installs plain `.apk` files and split bundles (`.xapk`, `.apks`) through Android's PackageInstaller.
 - Open, uninstall, re-download or edit any saved app; share a link from another app to add it.
@@ -29,10 +30,15 @@ installing them in one tap. It understands three kinds of sources:
   file details saved at the last install and to the website's modification date. Cards show
   *Newer file on the website* / *Same as your installed copy*. Sites that give no file details and
   don't allow partial downloads (some download scripts) can't be checked and say so.
-- **Scheduled updates:** choose a date and time (once, daily or weekly) and every app with
-  *Auto-update* ticked is updated then. On Android 12+ apps that App Downloader installed are
-  updated silently; anything Android wants you to confirm is downloaded and waiting, and the app
-  offers to install it next time you open it. *Update all now* runs the same thing immediately.
+- **Scheduled updates:** choose a time (once, daily, weekly, or every 1/2/4/8/12 hours) and every
+  app with *Auto-update* ticked is updated then. On Android 12+ apps that App Downloader installed
+  are updated silently (on Android 14+ only when the app isn't in use); anything Android wants you
+  to confirm is downloaded and waiting, and the app offers to install it next time you open it.
+  Optional *Wi-Fi only*; scheduled runs also wait for enough battery and storage. Settings shows
+  the result of the last run. *Update all now* runs the same thing immediately.
+- **Safe updates:** downloads from GitHub are checked against the size and checksum GitHub
+  publishes; an older version or a different app is never installed without asking; a secure
+  (https) link that redirects to an unencrypted one is stopped, and unencrypted links are marked.
 - **Back up & restore** (Settings): save the app list and settings to a file and restore them,
   show them as a QR code that another copy of the app scans, or restore from a link / aftv.news code.
 - Keeps itself up to date: when opened it checks this repository for a newer version and offers to
@@ -45,7 +51,7 @@ The latest version is always at this link:
 **https://github.com/edrock200/androidappdownloader/releases/latest/download/AppDownloader.apk**
 
 On a Fire TV or Android TV, open the *Downloader* app and enter code **9697744**
-(or go to [aftv.news/9697744](http://aftv.news/9697744)). Each
+(or go to [aftv.news/9697744](https://aftv.news/9697744)). Each
 release is also listed on the [Releases page](https://github.com/edrock200/androidappdownloader/releases).
 The very first build (1.0.0) is in the [`releases/`](releases/) folder.
 
@@ -68,9 +74,11 @@ up to date.
 3. Tap **Save & install**, or **Save** to install later. Accept Android's install prompt.
 
 Each saved app shows its installed version and, for GitHub repos, the latest release. Cards with an
-update are highlighted and sorted to the top; tap **Update to vX.Y** to install it. Use the
-⟳ button in the top bar to check all GitHub repos now, and the ⋮ menu on a card for *Check for
-update*, *Open release page / link*, *Edit*, *Uninstall app* and *Remove from list*.
+update get a ★, are highlighted and sorted to the top; tap **Update** to install it, or
+**Update all** at the top of the list (which turns into **Stop** while it runs). Use the ⟳ button
+in the top bar to check every app now, and the ⋮ menu on a card for *Check for update*,
+*Open release page / link*, *Update history*, *Edit*, *Uninstall app* and *Remove from list*.
+After restoring a backup on a new device, **Install all** installs the restored apps.
 
 If you installed an app some other way, open **Edit** on its entry and fill in its **package name**
 so the installed version is tracked.
@@ -132,8 +140,10 @@ base64 -w0 release.jks   # value for SIGNING_KEYSTORE_BASE64
 ```
 
 Then add the repository secrets `SIGNING_KEYSTORE_BASE64`, `SIGNING_KEYSTORE_PASSWORD`,
-`SIGNING_KEY_ALIAS` and `SIGNING_KEY_PASSWORD`. Without them, CI signs branch builds with a
-throw-away debug key and refuses to publish tagged releases.
+`SIGNING_KEY_ALIAS` and `SIGNING_KEY_PASSWORD`. Only the release job can read them: ordinary
+pushes and pull requests build without any secrets, and their test builds are marked
+`-dev+<commit>` so they can't be mistaken for a release. The release job refuses to publish an APK
+whose signing certificate doesn't match the pinned SHA-256 above, and attaches a `.sha256` file.
 
 ### Publishing a release
 
@@ -143,11 +153,15 @@ throw-away debug key and refuses to publish tagged releases.
    and click **Run workflow**. Pushing a tag (`git tag v1.2.0 && git push origin v1.2.0`) does the same.
 
 The version comes from what you enter (or the tag): `v1.2.3` becomes versionName `1.2.3` and versionCode `10203`, so
-there is nothing to edit in Gradle. Minor and patch numbers must stay below 100.
+there is nothing to edit in Gradle. Minor and patch numbers must stay below 100, without leading
+zeros, and the version must be newer than every earlier release.
 
-The workflow then tests and builds the app, signs it, publishes a GitHub release with
-`AppDownloader.apk` (the asset name never changes, so the "latest" link above always works), and
-announces it on Discord.
+The workflow then runs the tests and lint, stops if the changelog has no section for the version,
+builds and signs the app, checks the signing certificate, creates the GitHub release as a draft with
+`AppDownloader.apk` and its `.sha256` (the asset name never changes, so the "latest" link above
+always works), publishes it, and announces it on Discord. Re-running it for a version that is
+already published does nothing; if only the Discord post failed, run the workflow again with the
+same version and **announce_only** ticked.
 
 | Repository setting | Kind | Purpose |
 |---|---|---|
