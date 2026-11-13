@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.8.1] - 2026-11-13
+
+### Fixed
+- Backups now also save the "Wi-Fi only" and "Allow automatic updates from http links" settings, so restoring on another phone, tablet or TV brings them back too. Backups made with older versions still restore as before.
+
 ## [1.8.0] - 2026-11-12
 
 ### Added

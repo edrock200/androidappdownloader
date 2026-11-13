@@ -37,6 +37,9 @@ data class BackupSettings(
     val scheduleAt: Long = 0,
     val scheduleRepeat: Repeat = Repeat.ONCE,
     val updateOnlyIfChanged: Boolean = true,
+    /** Added in 1.8.1; null in older backups, which then leave the device's own choice alone. */
+    val wifiOnly: Boolean? = null,
+    val allowInsecureAutoUpdates: Boolean? = null,
 )
 
 @Serializable
@@ -114,6 +117,8 @@ object Backup {
             scheduleAt = settings.scheduleAt,
             scheduleRepeat = settings.scheduleRepeat,
             updateOnlyIfChanged = settings.updateOnlyIfChanged,
+            wifiOnly = settings.wifiOnly,
+            allowInsecureAutoUpdates = settings.allowInsecureAutoUpdates,
         ),
         apps = entries.map {
             BackupApp(
@@ -230,6 +235,8 @@ object Backup {
             scheduleAt = next ?: 0,
             scheduleRepeat = backup.scheduleRepeat,
             updateOnlyIfChanged = backup.updateOnlyIfChanged,
+            wifiOnly = backup.wifiOnly ?: current.wifiOnly,
+            allowInsecureAutoUpdates = backup.allowInsecureAutoUpdates ?: current.allowInsecureAutoUpdates,
         )
     }
 }

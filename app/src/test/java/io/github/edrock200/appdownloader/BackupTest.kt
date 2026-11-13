@@ -7,6 +7,7 @@ import io.github.edrock200.appdownloader.data.SettingsState
 import io.github.edrock200.appdownloader.data.SourceType
 import io.github.edrock200.appdownloader.net.RemoteChange
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -151,5 +152,22 @@ class BackupTest {
 
         val once = Backup.create(entries, settings.copy(scheduleAt = now - 1, scheduleRepeat = Repeat.ONCE), false, null, now)
         assertEquals(0L, Backup.restoreSettings(current, once.settings, now).scheduleAt) // A past one-off is dropped.
+    }
+
+    @Test
+    fun wifiAndInsecureSettingsRoundTripAndOldBackupsKeepTheDevicesChoice() {
+        val mine = settings.copy(wifiOnly = true, allowInsecureAutoUpdates = true)
+        val text = Backup.toJson(Backup.create(entries, mine, includeToken = false, appVersion = null, now = now))
+        val restored = Backup.restoreSettings(SettingsState(), Backup.parse(text).settings, now)
+        assertTrue(restored.wifiOnly)
+        assertTrue(restored.allowInsecureAutoUpdates)
+        val qr = Backup.parse(Backup.toQrText(Backup.create(entries, mine, includeToken = false, appVersion = null, now = now))!!).settings
+        assertEquals(true, qr.wifiOnly)
+
+        // A backup made before 1.8.1 has neither field: the device keeps what it had.
+        val old = Backup.parse("""{"format":"app-downloader-backup","version":1,"settings":{"checkIntervalHours":6},"apps":[]}""")
+        val kept = Backup.restoreSettings(SettingsState(wifiOnly = true, allowInsecureAutoUpdates = false), old.settings, now)
+        assertTrue(kept.wifiOnly)
+        assertFalse(kept.allowInsecureAutoUpdates)
     }
 }

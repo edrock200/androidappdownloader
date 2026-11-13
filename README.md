@@ -116,7 +116,9 @@ so the installed version is tracked.
 | TV or phone | Phone | *Show QR code* on the first device, *Scan QR code* on the phone. Scanning needs a camera and Google Play services. |
 | Phone | TV | Save a backup file on the phone, upload it somewhere with a direct download link (e.g. a GitHub Gist's *Raw* link), optionally make an aftv.news code for it, then *Restore from link or aftv.news code* on the TV. TVs have no camera, so they can't scan QR codes. |
 
-Backups contain each app's link, name, filters and auto-update choice, plus your settings. The
+Backups contain each app's link, name, filters and auto-update choice, plus your settings (check
+frequency, schedule, *Only update if changed*, *Wi-Fi only*, http auto-updates, self-update check,
+*Delete APK after install*). Update history and last-run results stay on the device. The
 GitHub token is only included in files when you tick *Include GitHub token in backup files*, and
 never in QR codes. Restoring doesn't install anything; install the apps from the list afterwards.
 
