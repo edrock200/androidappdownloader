@@ -7,7 +7,7 @@ plugins {
 
 // The release workflow sets APP_VERSION_NAME from the git tag (v1.2.3 -> 1.2.3).
 // versionCode is derived from it, so it always increases: 1.2.3 -> 10203.
-val appVersionName: String = System.getenv("APP_VERSION_NAME")?.takeIf { it.isNotBlank() } ?: "1.8.1"
+val appVersionName: String = System.getenv("APP_VERSION_NAME")?.takeIf { it.isNotBlank() } ?: "1.8.2"
 val appVersionCode: Int = run {
     // Same rule as the release workflow: no leading zeros (1.07.1 would collide with 1.7.1).
     require(Regex("^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]?)\\.(0|[1-9][0-9]?)$").matches(appVersionName)) {

@@ -55,7 +55,17 @@ class NetworkTest {
         assertEquals("v2.0", m.release.tagName)
         assertEquals("sha256:00", m.asset.digest)
         assertEquals("https://api/app.apk", m.asset.apiUrl)
-        assertTrue(server.takeRequest().path!!.endsWith("/repos/o/r/releases/latest"))
+        val request = server.takeRequest()
+        assertTrue(request.path!!.endsWith("/repos/o/r/releases/latest"))
+        assertTrue(request.getHeader("User-Agent")!!.startsWith("AppDownloader/"))
+    }
+
+    @Test
+    fun downloadsAndLinkChecksSendAChromeUserAgent() = runBlocking {
+        serveFile(fakeApk)
+        ApkDownloader.download(server.url("/a.apk").toString(), dir, "ua") {}
+        val agent = server.takeRequest().getHeader("User-Agent")!!
+        assertTrue(agent, agent.contains("Chrome/") && agent.contains("Android"))
     }
 
     @Test

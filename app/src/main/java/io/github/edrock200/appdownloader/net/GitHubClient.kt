@@ -148,6 +148,7 @@ object GitHubClient {
             .url(url)
             .header("Accept", "application/vnd.github+json")
             .header("X-GitHub-Api-Version", "2022-11-28")
+            .header("User-Agent", Http.API_USER_AGENT)
         val cacheKey = "$url|${token != null}"
         cache[cacheKey]?.let { builder.header("If-None-Match", it.first) }
         if (token != null) builder.header("Authorization", "Bearer $token")

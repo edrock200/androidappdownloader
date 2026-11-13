@@ -17,11 +17,20 @@ import java.util.concurrent.TimeUnit
 import javax.net.ssl.SSLContext
 import javax.net.ssl.TrustManagerFactory
 import javax.net.ssl.X509TrustManager
+import io.github.edrock200.appdownloader.BuildConfig
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 object Http {
-    const val USER_AGENT = "AppDownloader/1.0 (Android)"
+    /**
+     * Sent with downloads, link checks and aftv.news lookups: Chrome on Android, in the reduced form
+     * Chrome itself sends ("Android 10; K"). Some file hosts only serve browsers.
+     */
+    const val USER_AGENT =
+        "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36"
+
+    /** The GitHub API asks clients to name themselves; it answers the same either way. */
+    val API_USER_AGENT = "AppDownloader/${BuildConfig.VERSION_NAME} (Android; +https://github.com/${BuildConfig.UPDATE_REPO})"
 
     @Volatile
     private var appContext: Context? = null

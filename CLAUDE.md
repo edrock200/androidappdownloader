@@ -34,7 +34,7 @@ All code lives in `app/src/main/java/io/github/edrock200/appdownloader/`:
 | `data/Settings.kt` | SharedPreferences-backed settings as a `StateFlow`. |
 | `data/SourceParser.kt` | Detects whether user input is an aftv code, a GitHub repo or a URL. |
 | `data/VersionUtils.kt` | Version comparison and the `hasUpdate` rule. |
-| `net/Http.kt` | Shared OkHttp clients (`client` for downloads, `metaClient` with a call timeout for lookups), coroutine `execute` that cancels the call; blocks https→http redirects; bundles Let's Encrypt roots below Android 7.1.1. |
+| `net/Http.kt` | Shared OkHttp clients (`client` for downloads, `metaClient` with a call timeout for lookups), Chrome `USER_AGENT` on every request except the GitHub API (`API_USER_AGENT`), coroutine `execute` that cancels the call; blocks https→http redirects; bundles Let's Encrypt roots below Android 7.1.1. |
 | `net/Errors.kt`, `net/LinkNormalizer.kt` | Plain-language error messages (`Errors.friendly`, `isConnectivity`); Dropbox/Google Drive share links → direct downloads. |
 | `net/AftvResolver.kt` | Resolves codes via `https://go.aftvnews.com/<code>` by parsing the redirect page HTML. |
 | `net/GitHubClient.kt` | Releases API, repo URL parsing, `pickRelease` (pure). |

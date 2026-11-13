@@ -6,6 +6,9 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- Downloads and link checks now identify as the Chrome browser, because some websites only serve files to browsers.
+
 ## [1.8.1] - 2026-11-13
 
 ### Fixed
