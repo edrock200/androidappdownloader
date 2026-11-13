@@ -6,8 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.8.2] - 2026-11-13
+
 ### Changed
 - Downloads and link checks now identify as the Chrome browser, because some websites only serve files to browsers.
+
+### Fixed
+- aftv.news has started blocking automatic code lookups. Instead of "HTTP 403", the app now explains this and, on phones and tablets, offers "Open in browser" so you can see where the code leads and save that link instead.
 
 ## [1.8.1] - 2026-11-13
 

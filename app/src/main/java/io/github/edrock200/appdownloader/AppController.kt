@@ -19,6 +19,7 @@ import io.github.edrock200.appdownloader.install.ApkInstaller
 import io.github.edrock200.appdownloader.install.ExpectedFile
 import io.github.edrock200.appdownloader.install.InstalledApps
 import io.github.edrock200.appdownloader.install.NotAnApkException
+import io.github.edrock200.appdownloader.net.AftvBlockedException
 import io.github.edrock200.appdownloader.net.AftvResolver
 import io.github.edrock200.appdownloader.net.ChangeReason
 import io.github.edrock200.appdownloader.net.Errors
@@ -263,7 +264,7 @@ class AppController(
         } catch (e: NotAnApkException) {
             setOp(entryId, OpState.Failed(e.message ?: "Not an APK", e.pageUrl))
         } catch (e: Exception) {
-            setOp(entryId, OpState.Failed(Errors.friendly(e)))
+            setOp(entryId, failed(e))
         } finally {
             if (owns(entryId, myJob)) jobs.remove(entryId)
         }
@@ -669,6 +670,11 @@ class AppController(
      * Asks the server whether a link / aftv entry's file differs from the installed copy, without
      * downloading it, and stores the result. A failed check keeps the previous result.
      */
+    /** A card error; a blocked aftv.news lookup offers to open the code in a browser. */
+    private fun failed(e: Exception): OpState.Failed =
+        if (e is AftvBlockedException) OpState.Failed(Errors.friendly(e), AftvResolver.shortUrl(e.code))
+        else OpState.Failed(Errors.friendly(e))
+
     suspend fun checkLink(entry: AppEntry, resolvedUrl: String? = null, quiet: Boolean = false): AppEntry =
         checkLinkOutcome(entry, resolvedUrl, quiet).entry
 
@@ -1034,7 +1040,7 @@ class AppController(
                 throw e
             } catch (e: Exception) {
                 if (Errors.isConnectivity(e)) connectivityFailures++
-                setOp(id, OpState.Failed(Errors.friendly(e)))
+                setOp(id, failed(e))
                 if (!interactive) {
                     repository.update(id) { it.copy(lastUpdateError = Errors.friendly(e), lastUpdateErrorAt = System.currentTimeMillis()) }
                 }

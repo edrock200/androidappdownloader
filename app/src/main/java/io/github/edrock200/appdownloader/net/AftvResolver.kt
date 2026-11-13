@@ -2,8 +2,15 @@ package io.github.edrock200.appdownloader.net
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.Request
 import java.io.IOException
+
+/** aftv.news answered with a bot check (Cloudflare) instead of the code's page. */
+class AftvBlockedException(val code: String) : IOException(
+    "aftv.news is blocking automatic lookups right now. Open aftv.news/$code in a browser to see where it leads, " +
+        "then edit this app to use that link instead"
+)
 
 /**
  * Resolves AFTVnews short codes (as used by the "Downloader" app on Fire TV),
@@ -34,16 +41,32 @@ object AftvResolver {
         Http.execute(request).use { response ->
             val finalUrl = response.request.url
             // The shortener may redirect straight to the target in the future.
-            if (!finalUrl.host.endsWith("aftvnews.com") && !finalUrl.host.endsWith("aftv.news")) {
+            val ownHost = finalUrl.host.endsWith("aftvnews.com") || finalUrl.host.endsWith("aftv.news") ||
+                finalUrl.host == resolveBase.toHttpUrlOrNull()?.host
+            if (!ownHost) {
                 return@withContext finalUrl.toString()
             }
-            if (!response.isSuccessful) throw IOException("aftv.news returned HTTP ${response.code}")
+            if (!response.isSuccessful) {
+                val body = runCatching { response.peekBody(64 * 1024).string() }.getOrDefault("")
+                if (isBotCheck(response.code, response.header("cf-mitigated"), response.header("Server"), body)) {
+                    throw AftvBlockedException(code)
+                }
+                throw IOException("aftv.news returned HTTP ${response.code}")
+            }
             val html = response.body?.string().orEmpty()
             parseTarget(html) ?: throw IOException(
                 if (isNotFound(html)) "aftv.news code $code does not exist"
                 else "Could not find the destination of aftv.news code $code"
             )
         }
+    }
+
+    /** Whether a failed answer is a bot check page (Cloudflare's "Just a moment..."), not a missing code. */
+    fun isBotCheck(status: Int, cfMitigated: String?, server: String?, body: String): Boolean {
+        if (status != 403 && status != 429 && status != 503) return false
+        if (cfMitigated.equals("challenge", ignoreCase = true)) return true
+        val cloudflare = server?.contains("cloudflare", ignoreCase = true) == true
+        return cloudflare && (body.contains("Just a moment", ignoreCase = true) || body.contains("challenges.cloudflare.com"))
     }
 
     fun isNotFound(html: String) = html.contains("does not exist", ignoreCase = true)

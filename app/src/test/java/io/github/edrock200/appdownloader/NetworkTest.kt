@@ -4,6 +4,8 @@ import io.github.edrock200.appdownloader.data.AppEntry
 import io.github.edrock200.appdownloader.data.SourceType
 import io.github.edrock200.appdownloader.install.ApkDownloader
 import io.github.edrock200.appdownloader.install.ExpectedFile
+import io.github.edrock200.appdownloader.net.AftvBlockedException
+import io.github.edrock200.appdownloader.net.AftvResolver
 import io.github.edrock200.appdownloader.net.GitHubClient
 import io.github.edrock200.appdownloader.net.RateLimitException
 import io.github.edrock200.appdownloader.net.RemoteProbe
@@ -190,5 +192,32 @@ class NetworkTest {
         val html = """<a href="http://evil.example/app.apk">x</a> <a href="/files/app.apk">y</a>"""
         assertEquals("https://site.example/files/app.apk", ApkDownloader.findApkLink(html, "https://site.example/page"))
         assertEquals(null, ApkDownloader.findApkLink("""<a href="http://evil.example/app.apk">x</a>""", "https://site.example/page"))
+    }
+
+    @Test
+    fun aftvBotCheckIsReportedPlainly() = runBlocking {
+        AftvResolver.resolveBase = server.url("/").toString()
+        try {
+            server.enqueue(
+                MockResponse().setResponseCode(403).setHeader("cf-mitigated", "challenge").setHeader("Server", "cloudflare")
+                    .setBody("<html><title>Just a moment...</title></html>")
+            )
+            try {
+                AftvResolver.resolve("9697744")
+                fail("expected a blocked lookup")
+            } catch (e: AftvBlockedException) {
+                assertEquals("9697744", e.code)
+                assertTrue(e.message!!, e.message!!.contains("aftv.news/9697744"))
+            }
+            // A plain 403 without a bot check stays a normal error.
+            server.enqueue(MockResponse().setResponseCode(403).setBody("Forbidden"))
+            val plain = runCatching { AftvResolver.resolve("1") }.exceptionOrNull()
+            assertTrue(plain is IOException && plain !is AftvBlockedException)
+            // And a normal redirect page still resolves.
+            server.enqueue(MockResponse().setBody("""<script>window.location.href = "https://example.com/app.apk";</script>"""))
+            assertEquals("https://example.com/app.apk", AftvResolver.resolve("2"))
+        } finally {
+            AftvResolver.resolveBase = "https://go.aftvnews.com/"
+        }
     }
 }
