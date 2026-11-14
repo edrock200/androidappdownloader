@@ -412,6 +412,17 @@ fun MainScreen(vm: MainViewModel) {
                 Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
                     Text("These were downloaded earlier and need your OK to install:")
                     Spacer(Modifier.height(8.dp))
+                    Text(
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                            "Android asks for your OK when App Downloader didn't first install an app, or when the app " +
+                                "is built for an older Android. After you confirm once, later updates can usually install " +
+                                "on their own while the app isn't in use."
+                        } else {
+                            "This device asks for your OK before every install."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Spacer(Modifier.height(8.dp))
                     waitingItems.forEach { item ->
                         // Focusable rows let a TV remote scroll a long list.
                         Text(
@@ -431,6 +442,7 @@ fun MainScreen(vm: MainViewModel) {
                 TextButton(modifier = Modifier.focusHighlight(), onClick = { showWaitingPrompt = false }) { Text("Later") }
             },
         )
+        // "Later" keeps the star and Update button on the card; this prompt returns only for a newer version.
     }
 
     qrText?.let { ShowQrDialog(it, vm.appCount(), onDismiss = { qrText = null }) }

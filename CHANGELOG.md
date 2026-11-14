@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.8.3] - 2026-11-14
+
+### Fixed
+- The "Update ready to install" message now appears only once for each new version, instead of every time App Downloader restarts. Choosing "Later" keeps the star and the Update button on the app, so you can install it whenever you like.
+- The message explains why your OK is needed, and that after you confirm once, later updates of that app can usually install on their own (Android 12 and newer).
+
 ## [1.8.2] - 2026-11-13
 
 ### Changed

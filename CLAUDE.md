@@ -110,7 +110,7 @@ Unit tests are in `app/src/test/...` and cover the pure logic only.
   links, downloads and compares versionCode), and stores a newer APK as `readyFile`/`readyVersion*`/`readyTag`.
   Background runs commit sessions with `EXTRA_BACKGROUND`; on Android 12+ they can complete silently,
   otherwise `InstallResultReceiver` abandons the session on `STATUS_PENDING_USER_ACTION` and the update
-  stays "waiting" (notification + prompt on next launch). Below Android 12 nothing is committed in
+  stays "waiting" (notification + a "ready to install" prompt shown once per downloaded version — `WaitingPrompt`, remembered in the "ui" prefs). Below Android 12 nothing is committed in
   the background. Interactive runs ("Update all now", "Install now") install one app at a time,
   waiting for each result (`awaitInstallResult`). `runInstall` always prefers a waiting `readyFile`;
   stale ones (older than installed, or not the latest GitHub tag) are discarded.

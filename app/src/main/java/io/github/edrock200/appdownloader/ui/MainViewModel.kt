@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import io.github.edrock200.appdownloader.App
 import io.github.edrock200.appdownloader.BuildConfig
 import io.github.edrock200.appdownloader.OpState
+import io.github.edrock200.appdownloader.data.WaitingPrompt
 import io.github.edrock200.appdownloader.data.AppEntry
 import io.github.edrock200.appdownloader.data.Backup
 import io.github.edrock200.appdownloader.data.BackupFile
@@ -101,15 +102,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val settings = app.settings.state
     val messages = app.controller.messages
 
-    /** Waiting updates already offered in the "ready to install" prompt (id to version). */
-    private var offeredWaiting = emptySet<String>()
+    /** Remembers which waiting updates the "ready to install" prompt already showed, across restarts. */
+    private val uiPrefs = application.getSharedPreferences("ui", android.content.Context.MODE_PRIVATE)
 
-    /** Returns true when the waiting set contains something not offered yet (and remembers it). */
+    /** Returns true when the waiting set contains a version not offered yet (and remembers it). */
     fun shouldOfferWaiting(waiting: List<EntryUi>): Boolean {
-        val keys = waiting.map { "${it.entry.id}:${it.entry.readyVersionCode ?: it.entry.readyFile}" }.toSet()
-        val fresh = (keys - offeredWaiting).isNotEmpty()
-        offeredWaiting = offeredWaiting + keys
-        return fresh
+        val offered = runCatching { uiPrefs.getStringSet(OFFERED_WAITING, null)?.toSet() }.getOrNull() ?: emptySet()
+        val allReady = app.repository.entries.value.filter { it.readyFile != null }.map(WaitingPrompt::key).toSet()
+        val decision = WaitingPrompt.decide(waiting.map { WaitingPrompt.key(it.entry) }.toSet(), offered, allReady)
+        uiPrefs.edit().putStringSet(OFFERED_WAITING, decision.remember).apply()
+        return decision.show
     }
 
     /** Whether Android currently lets App Downloader install apps; refreshed when the app returns to the screen. */
@@ -403,3 +405,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (old.githubToken != state.githubToken.trim()) app.controller.clearTokenExpired()
     }
 }
+
+/** SharedPreferences key ("ui" file) for the waiting updates the prompt already showed. */
+private const val OFFERED_WAITING = "offered_waiting"
